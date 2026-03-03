@@ -378,7 +378,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
               <input type="file" id="fSketch" accept=".bin">
               <input type="text" id="aSketch" value="0x10000" style="width:80px">
             </div>
-            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.bin</span> · Browse to override</div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test09.ino.bin</span> · Browse to override</div>
           </div>
         </div>
 
@@ -391,7 +391,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
               <input type="file" id="fMerged" accept=".bin">
               <input type="text" id="aMerged" value="0x0" style="width:80px">
             </div>
-            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.merged.bin</span> → 0x0 · Browse to override</div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test09.ino.merged.bin</span> → 0x0 · Browse to override</div>
           </div>
         </div>
 
@@ -495,11 +495,28 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
             <input type="text" id="camSavePath" placeholder="/images/0Blank/" style="flex:1">
             <button class="btn ghost sm" onclick="camUseCwd()" title="Use current SD directory" style="padding:4px 7px;font-size:.62rem">⊙ CWD</button>
           </div>
-          <!-- Action row -->
+          <!-- Stream interval row -->
+          <div class="cam-row">
+            <span class="cam-lbl">Stream</span>
+            <select id="camStreamInterval" style="flex:1">
+              <option value="0">As fast as possible</option>
+              <option value="500">~2 fps  (500 ms)</option>
+              <option value="1000" selected>~1 fps  (1 s)</option>
+              <option value="2000">0.5 fps  (2 s)</option>
+              <option value="5000">0.2 fps  (5 s)</option>
+            </select>
+          </div>
+          <!-- Capture / Stream row -->
           <div class="cam-row" style="gap:8px;justify-content:space-between">
             <button class="btn primary" id="btnCapture" onclick="camCapture()" disabled style="flex:1">
               📷 Capture
             </button>
+            <button class="btn" id="btnStream" onclick="camToggleStream()" disabled style="flex:1;color:var(--green);border-color:var(--green)">
+              ▶ Stream
+            </button>
+          </div>
+          <!-- Save row -->
+          <div class="cam-row" style="gap:8px;justify-content:space-between">
             <button class="btn green" id="btnSaveSD" onclick="camSaveToSD()" disabled style="flex:1">
               💾 Save to SD
             </button>
@@ -686,15 +703,16 @@ const S = {
     // Flash settings
     myFlashMode: 'A', // Tracks if Option A or Option B is active
     // Option A: Sketch Only
-    myFlashSketchFile: 'esp32_web_tool_test07.ino.bin',
+    myFlashSketchFile: 'esp32_web_tool_test09.ino.bin',
     myFlashSketchAddr: '0x10000',
 
     // Option B: Full Merged
-    myFlashMergedFile: 'esp32_web_tool_test07.ino.merged.bin',
+    myFlashMergedFile: 'esp32_web_tool_test09.ino.merged.bin',
     myFlashMergedAddr: '0x0',
   cwd:'/',
   sdEntries:[],
   selectedFile:null,
+  selectedIsDir:false,
   contentFile:null,
   viewerCollapsed:false,
   // collectors
@@ -708,6 +726,7 @@ const S = {
   camChunks:[],
   camB64:null,           // last captured image as base64 string
   camCapturing:false,    // guard against double-capture
+  camStreaming:false,    // true while continuous stream is running
   // microphone
   collectMic:false,
   micChunks:[],
@@ -933,7 +952,9 @@ function setConnected(v){
   document.getElementById('btnCon').disabled=v;
   ['btnDis','btnRst','btnSend'].forEach(id=>document.getElementById(id).disabled=!v);
   document.getElementById('btnCapture').disabled=!v;
-  if(v) document.getElementById('camStatusMsg').textContent='Ready — press Capture';
+  document.getElementById('btnStream').disabled=!v;
+  if(!v && S.camStreaming) camStopStream();
+  if(v) document.getElementById('camStatusMsg').textContent='Ready — press Capture or Stream';
   else  document.getElementById('camStatusMsg').textContent='Connect device to enable camera';
   document.getElementById('btnRecord').disabled=!v;
   if(v) document.getElementById('micInfo').textContent='Ready — set duration and press Record';
@@ -1394,8 +1415,18 @@ function renderSdList(){
 }
 
 function sdClick(path,isDir,event){
-  if(isDir){sdNavigate(path);return;}
+  if(isDir){
+    // Single-click selects the folder for deletion; double-click navigates into it
+    if(event.detail===2){ sdNavigate(path); return; }
+    S.selectedFile=path;
+    S.selectedIsDir=true;
+    document.querySelectorAll('.sd-entry').forEach(e=>e.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+    document.getElementById('btnDeleteFile').style.display='block';
+    return;
+  }
   S.selectedFile=path;
+  S.selectedIsDir=false;
   document.querySelectorAll('.sd-entry').forEach(e=>e.classList.remove('selected'));
   event.currentTarget.classList.add('selected');
   document.getElementById('btnDeleteFile').style.display='block';
@@ -1615,9 +1646,15 @@ function confirmNewFile(){
 }
 function sdDeleteSelected(){
   if(!S.selectedFile)return;
-  if(!confirm(`Delete ${S.selectedFile} from SD card?`))return;
-  sendCmd(`SD_DELETE:${S.selectedFile}`);
+  if(S.selectedIsDir){
+    if(!confirm(`Delete folder "${S.selectedFile}" and ALL its contents from the SD card?\n\nThis cannot be undone.`))return;
+    sendCmd(`SD_RMDIR:${S.selectedFile}`);
+  }else{
+    if(!confirm(`Delete ${S.selectedFile} from SD card?`))return;
+    sendCmd(`SD_DELETE:${S.selectedFile}`);
+  }
   S.selectedFile=null;
+  S.selectedIsDir=false;
   document.getElementById('btnDeleteFile').style.display='none';
   setTimeout(sdRefresh,400);
 }
@@ -2033,6 +2070,60 @@ function micSaveToPC(){
 //  Camera
 // ═══════════════════════════════
 
+// Toggle live streaming on/off
+function camToggleStream() {
+  if(S.camStreaming) {
+    camStopStream();
+  } else {
+    camStartStream();
+  }
+}
+
+function camStartStream() {
+  if(!S.writer){ termLog('err','Not connected'); return; }
+  S.camStreaming = true;
+  document.getElementById('btnStream').textContent = '■ Stop';
+  document.getElementById('btnStream').style.color = 'var(--red)';
+  document.getElementById('btnStream').style.borderColor = 'var(--red)';
+  document.getElementById('btnCapture').disabled = true;
+  document.getElementById('camStatusMsg').textContent = 'Streaming — press ■ Stop to end';
+  termLog('sys', '📷 Camera stream started');
+  // Kick off the first frame
+  camStreamNextFrame();
+}
+
+function camStopStream() {
+  S.camStreaming = false;
+  S.camCapturing = false;
+  document.getElementById('btnStream').textContent = '▶ Stream';
+  document.getElementById('btnStream').style.color = 'var(--green)';
+  document.getElementById('btnStream').style.borderColor = 'var(--green)';
+  document.getElementById('btnCapture').disabled = !S.connected;
+  document.getElementById('camOverlay').classList.remove('active');
+  document.getElementById('camTransferBar').style.display = 'none';
+  document.getElementById('camStatusMsg').textContent = '■ Stream stopped — last frame shown';
+  termLog('sys', '📷 Camera stream stopped');
+}
+
+async function camStreamNextFrame() {
+  if(!S.camStreaming || !S.writer) return;
+  // Guard: don't fire if a capture is already in flight
+  if(S.camCapturing) return;
+  S.camCapturing = true;
+  S.camChunks = [];
+  S.collectCam = true;
+
+  const res  = document.getElementById('camRes').value;
+  const qual = document.getElementById('camQuality').value;
+
+  const bar = document.getElementById('camTransferBar');
+  bar.style.display = 'block';
+  document.getElementById('camTransferFill').style.width = '0%';
+
+  await writeSerial(`CAM_CAPTURE:${res}:${qual}\n`);
+  // Note: no termLog here to avoid flooding the terminal during streaming
+}
+
 // Generate a timestamp filename: img_YYYYMMDD_HHMMSS.jpg
 function camFilename() {
   const d = new Date();
@@ -2055,6 +2146,7 @@ async function camCapture() {
   // Disable save buttons until new image arrives
   document.getElementById('btnSaveSD').disabled = true;
   document.getElementById('btnSavePC').disabled = true;
+  document.getElementById('btnStream').disabled = true;
 
   const res  = document.getElementById('camRes').value;
   const qual = document.getElementById('camQuality').value;
@@ -2088,16 +2180,35 @@ function camShowCapture(b64) {
     const infoEl = document.getElementById('camImgInfo');
     infoEl.textContent = info;
     infoEl.className = 'cam-img-info visible';
-    document.getElementById('btnSaveSD').disabled = false;
-    document.getElementById('btnSavePC').disabled = false;
-    document.getElementById('camStatusMsg').textContent = `✓ ${info} — ready to save`;
-    termLog('ok', `📷 Capture complete: ${info}`);
+
+    if(S.camStreaming) {
+      // In stream mode: update fps info, schedule next frame
+      document.getElementById('camStatusMsg').textContent = `▶ Streaming · ${info}`;
+      const interval = parseInt(document.getElementById('camStreamInterval').value) || 0;
+      if(interval > 0) {
+        setTimeout(camStreamNextFrame, interval);
+      } else {
+        // As fast as possible — fire immediately
+        camStreamNextFrame();
+      }
+    } else {
+      // Single capture mode
+      document.getElementById('btnSaveSD').disabled = false;
+      document.getElementById('btnSavePC').disabled = false;
+      document.getElementById('btnStream').disabled = false;
+      document.getElementById('camStatusMsg').textContent = `✓ ${info} — ready to save`;
+      termLog('ok', `📷 Capture complete: ${info}`);
+    }
   };
   img.onerror = () => {
     document.getElementById('camStatusMsg').textContent = '✗ Failed to decode JPEG';
     termLog('err', 'Camera JPEG decode failed');
     document.getElementById('camPlaceholder').style.display = '';
     S.camCapturing = false;
+    if(S.camStreaming) {
+      // Try to recover stream after a brief pause
+      setTimeout(camStreamNextFrame, 1000);
+    }
   };
   img.src = 'data:image/jpeg;base64,' + b64;
 }
