@@ -1,0 +1,1158 @@
+// ============================================================
+//  esp32-to-web05.ino  (saved as .txt for transfer)
+//  Target : Seeed Studio XIAO ESP32S3 Sense
+//  Modules: LSM6DS3 IMU (XIAOml kit expansion board)
+//           SSD1306 0.42" OLED 72x40 (XIAOml expansion board)
+//           MicroSD card (XIAOml expansion board / onboard)
+//           OV2640 Camera (XIAO ESP32S3 Sense onboard)
+//           PDM Microphone (XIAO ESP32S3 Sense onboard — pins 42/41)
+//
+//  Serial command protocol for webSerial01.html
+//  Default baud: 115200
+//
+//  Expected SD folder structure:
+//    /header/
+//      config.json
+//      myWeights.bin
+//    /images/
+//      /0Blank/   *.jpg
+//      /1Circle/  *.jpg
+//      /2Square/  *.jpg
+//      (any other class folders)
+//
+//  Required Libraries (Arduino Library Manager):
+//    - Seeed Arduino LSM6DS3  by Seeed Studio
+//    - U8g2  by oliver  (search "U8g2" in Library Manager)
+//    - SD  (built-in with ESP32 board package)
+//    - mbedtls/base64  built into ESP32 SDK — no install needed
+//    - esp_camera  built into ESP32 board package — no install needed
+//    - ESP_I2S  by Seeed Studio  (search "ESP_I2S" in Library Manager)
+//      NOTE: The sketch uses ESP_I2S.recordWAV() which is a Seeed extension
+//            not in the standard Arduino I2S library.
+//
+//  Board: XIAO_ESP32S3  in Arduino IDE
+//         Boards URL: https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+// ============================================================
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <SD.h>
+#include "LSM6DS3.h"
+#include <U8g2lib.h>
+
+// ── mbedtls base64 is built into the ESP32 SDK, no extra library needed ──
+#include "mbedtls/base64.h"
+
+// ── OV2640 camera (XIAO ESP32S3 Sense) ──
+#include "esp_camera.h"
+
+// ── PDM Microphone (XIAO ESP32S3 Sense) ──
+// ESP_I2S is a Seeed Studio library — install from Library Manager.
+// It wraps the ESP32 I2S driver and adds recordWAV() which handles
+// the 44-byte WAV header and PSRAM allocation automatically.
+#include "ESP_I2S.h"
+
+// ─────────────────────────────────────────────────────
+//  Hardware config
+// ─────────────────────────────────────────────────────
+// OLED: 0.42" SSD1306, 72x40 pixels, U8g2 library
+//   U8G2_R2 = 180° rotation — matches XIAOml expansion board orientation
+//   and the camera/data-collection sketch. Page-buffer mode (_1_) saves RAM;
+//   swap to _F_ for full-buffer if you need faster redraws.
+
+// IMU: LSM6DS3 on I2C 0x6A
+// SD: XIAO ESP32S3 Sense onboard SD CS=21
+//     If using XIAOml expansion board SD slot, check which CS pin is used.
+//     Common values: 21 (onboard), or the expansion board may route to a different pin.
+#define SD_CS  21
+
+// ── Camera pins — XIAO ESP32S3 Sense OV2640 ──
+#define PWDN_GPIO_NUM    -1
+#define RESET_GPIO_NUM   -1
+#define XCLK_GPIO_NUM    10
+#define SIOD_GPIO_NUM    40
+#define SIOC_GPIO_NUM    39
+#define Y9_GPIO_NUM      48
+#define Y8_GPIO_NUM      11
+#define Y7_GPIO_NUM      12
+#define Y6_GPIO_NUM      14
+#define Y5_GPIO_NUM      16
+#define Y4_GPIO_NUM      18
+#define Y3_GPIO_NUM      17
+#define Y2_GPIO_NUM      15
+#define VSYNC_GPIO_NUM   38
+#define HREF_GPIO_NUM    47
+#define PCLK_GPIO_NUM    13
+
+// ─────────────────────────────────────────────────────
+//  Objects
+// ─────────────────────────────────────────────────────
+LSM6DS3 imu(I2C_MODE, 0x6A);
+
+// Same constructor as the camera sketch — ensures identical display behaviour
+U8G2_SSD1306_72X40_ER_1_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);
+
+// ─────────────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────────────
+bool imuOk    = false;
+bool oledOk   = false;
+bool sdOk     = false;
+bool cameraOk = false;
+bool micOk    = false;
+
+// ── Microphone (I2S PDM) ──
+I2SClass i2s;
+uint32_t micSampleRate = 16000;  // current sample rate; can be changed per-command
+
+bool imuStreaming    = false;
+bool oledImuLive     = false;     // true = loop() refreshes OLED with IMU accel each stream tick
+String oledFontMode  = "NORMAL";  // "NORMAL" | "SMALL" | "LARGE" — set by OLED_FONT:
+unsigned long lastStreamMs = 0;
+const uint16_t STREAM_INTERVAL_MS = 50;  // 20 Hz
+
+// JPEG write state (receive base64 chunks from web page)
+bool  jpegWriting     = false;
+String jpegWritePath  = "";
+String jpegB64Buffer  = "";
+uint32_t jpegExpectedSize = 0;
+
+// ─────────────────────────────────────────────────────
+//  setup()
+// ─────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  delay(1500);
+  Serial.println("OK:=== XIAO ESP32S3 WebSerial Sketch v1.4 ===");
+
+  // ── IMU ──
+  Wire.begin();
+  imuOk = (imu.begin() == 0);
+  Serial.println(imuOk ? "OK:IMU LSM6DS3 ready" : "ERR:IMU init failed");
+
+  // ── OLED ──
+  // u8g2.begin() returns true on success. Unlike Adafruit, U8g2 uses
+  // baseline-y coordinates: setCursor(x, y) where y is the text baseline.
+  // With u8g2_font_ncenB10_tr (~10px tall): y=10 line1, y=22 line2, y=34 line3.
+  oledOk = u8g2.begin();
+  if (oledOk) {
+    u8g2.firstPage();
+    do {
+      u8g2.setFont(u8g2_font_ncenB10_tr);
+      u8g2.setCursor(3, 12); u8g2.print("XIAOml");
+      u8g2.setCursor(3, 26); u8g2.print("WebSerial");
+    } while (u8g2.nextPage());
+    Serial.println("OK:OLED U8g2 72x40 R2 ready");
+  } else {
+    Serial.println("ERR:OLED init failed");
+  }
+
+  // ── SD ──
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  delay(50);
+  sdOk = SD.begin(SD_CS);
+  if (sdOk) {
+    Serial.println("OK:SD card ready");
+    uint32_t sz = (uint32_t)(SD.cardSize() / (1024 * 1024));
+    Serial.print("OK:SD size: "); Serial.print(sz); Serial.println(" MB");
+  } else {
+    Serial.println("ERR:SD mount failed — check card and wiring");
+  }
+
+  // ── Camera ──
+  // Must compile with: Tools → PSRAM → "OPI PSRAM"
+  // Camera init happens after SD to avoid SPI/I2S conflicts.
+  camera_config_t camCfg;
+  camCfg.ledc_channel = LEDC_CHANNEL_0;
+  camCfg.ledc_timer   = LEDC_TIMER_0;
+  camCfg.pin_d0       = Y2_GPIO_NUM;
+  camCfg.pin_d1       = Y3_GPIO_NUM;
+  camCfg.pin_d2       = Y4_GPIO_NUM;
+  camCfg.pin_d3       = Y5_GPIO_NUM;
+  camCfg.pin_d4       = Y6_GPIO_NUM;
+  camCfg.pin_d5       = Y7_GPIO_NUM;
+  camCfg.pin_d6       = Y8_GPIO_NUM;
+  camCfg.pin_d7       = Y9_GPIO_NUM;
+  camCfg.pin_xclk     = XCLK_GPIO_NUM;
+  camCfg.pin_pclk     = PCLK_GPIO_NUM;
+  camCfg.pin_vsync    = VSYNC_GPIO_NUM;
+  camCfg.pin_href     = HREF_GPIO_NUM;
+  camCfg.pin_sscb_sda = SIOD_GPIO_NUM;
+  camCfg.pin_sscb_scl = SIOC_GPIO_NUM;
+  camCfg.pin_pwdn     = PWDN_GPIO_NUM;
+  camCfg.pin_reset    = RESET_GPIO_NUM;
+  camCfg.xclk_freq_hz = 20000000;
+  camCfg.frame_size   = FRAMESIZE_VGA;
+  camCfg.pixel_format = PIXFORMAT_JPEG;
+  camCfg.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
+  camCfg.fb_location  = CAMERA_FB_IN_PSRAM;
+  camCfg.jpeg_quality = 12;
+  camCfg.fb_count     = 1;
+  if (psramFound()) {
+    camCfg.jpeg_quality = 12;
+    camCfg.fb_count     = 2;
+    camCfg.grab_mode    = CAMERA_GRAB_LATEST;
+  } else {
+    camCfg.frame_size  = FRAMESIZE_SVGA;
+    camCfg.fb_location = CAMERA_FB_IN_DRAM;
+    Serial.println("WARN:No PSRAM — camera limited to SVGA, compile with OPI PSRAM for best results");
+  }
+  cameraOk = (esp_camera_init(&camCfg) == ESP_OK);
+  Serial.println(cameraOk ? "OK:Camera OV2640 ready" : "ERR:Camera init failed — check PSRAM setting");
+  if (cameraOk) {
+    // Warm-up: discard a couple of frames so auto-exposure settles
+    for (int i = 0; i < 3; i++) {
+      camera_fb_t *fb = esp_camera_fb_get();
+      if (fb) esp_camera_fb_return(fb);
+      delay(50);
+    }
+  }
+
+  // ── Microphone ──
+  // PDM RX: CLK=42, DATA=41 — fixed pins on XIAO ESP32S3 Sense.
+  // i2s.begin() must be called before the first recording.
+  // We initialize at 16kHz here; MIC_RECORD can reinit at a different rate.
+  i2s.setPinsPdmRx(42, 41);
+  micOk = i2s.begin(I2S_MODE_PDM_RX, micSampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+  Serial.println(micOk ? "OK:Microphone PDM 16kHz ready" : "ERR:Microphone init failed");
+
+  printStatus();
+  printHelp();
+}
+
+// ─────────────────────────────────────────────────────
+//  loop()
+// ─────────────────────────────────────────────────────
+void loop() {
+  // Handle incoming serial commands
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.length() > 0) handleCommand(cmd);
+  }
+
+  // IMU stream — sends data to serial; also refreshes OLED live if oledImuLive is set
+  if (imuStreaming && imuOk && (millis() - lastStreamMs >= STREAM_INTERVAL_MS)) {
+    lastStreamMs = millis();
+    sendImuLine();
+    if (oledImuLive && oledOk) oledShowIMU();  // live OLED update every stream tick (50 ms)
+  }
+}
+
+// ─────────────────────────────────────────────────────
+//  Command Handler
+// ─────────────────────────────────────────────────────
+void handleCommand(const String& cmd) {
+
+  // ── System ───────────────────────────────────────
+  if (cmd == "PING") {
+    Serial.println("OK:PONG");
+
+  } else if (cmd == "HELP") {
+    printHelp();
+
+  } else if (cmd == "STATUS") {
+    printStatus();
+
+  } else if (cmd == "HEAP") {
+    Serial.print("OK:Free heap: ");
+    Serial.print(ESP.getFreeHeap());
+    Serial.println(" bytes");
+
+  } else if (cmd == "RESET") {
+    Serial.println("OK:Resetting...");
+    delay(200);
+    ESP.restart();
+
+  // ── IMU ──────────────────────────────────────────
+  } else if (cmd == "IMU") {
+    if (!imuOk) { Serial.println("ERR:IMU not available"); return; }
+    sendImuLine();
+
+  } else if (cmd == "IMU_STREAM") {
+    if (!imuOk) { Serial.println("ERR:IMU not available"); return; }
+    imuStreaming = true;
+    Serial.println("OK:IMU streaming started");
+
+  } else if (cmd == "IMU_STOP") {
+    imuStreaming = false;
+    oledImuLive  = false;  // also stop live OLED refresh
+    Serial.println("OK:IMU streaming stopped");
+
+  // ── OLED ─────────────────────────────────────────
+  } else if (cmd.startsWith("OLED:")) {
+    if (!oledOk) { Serial.println("ERR:OLED not available"); return; }
+    oledImuLive = false;  // switching to message mode stops live IMU
+    String msg = cmd.substring(5);
+    msg.replace("\\n", "\n");
+    oledMessage(msg);
+    // Echo back with real \n replaced by literal \n so the web page
+    // doesn't lose line breaks when the serial line is split at \n
+    String echoMsg = msg;
+    echoMsg.replace("\n", "\\n");
+    Serial.print("OLED_ECHO:"); Serial.println(echoMsg);
+    Serial.println("OK:OLED updated");
+
+  } else if (cmd == "OLED_CLEAR") {
+    if (!oledOk) { Serial.println("ERR:OLED not available"); return; }
+    oledImuLive = false;  // stop live IMU refresh
+    u8g2.clearDisplay();  // sends all-zero buffer to display immediately
+    Serial.println("OK:OLED cleared");
+
+  } else if (cmd == "OLED_IMU") {
+    if (!oledOk || !imuOk) { Serial.println("ERR:OLED or IMU not available"); return; }
+    oledImuLive = true;   // loop() will refresh OLED every stream tick
+    oledShowIMU();        // show immediately for instant feedback
+    // Auto-start IMU streaming so OLED keeps updating (webpage also sends IMU_STREAM)
+    if (!imuStreaming) {
+      imuStreaming = true;
+      Serial.println("OK:IMU streaming started");
+    }
+    Serial.println("OK:OLED showing IMU");
+
+  } else if (cmd == "OLED_STATUS") {
+    if (!oledOk) { Serial.println("ERR:OLED not available"); return; }
+    oledShowStatus();
+    Serial.println("OK:OLED showing status");
+
+  } else if (cmd.startsWith("OLED_FONT:")) {
+    if (!oledOk) { Serial.println("ERR:OLED not available"); return; }
+    String fontMode = cmd.substring(10);
+    fontMode.trim();
+    if (fontMode == "SMALL") {
+      oledFontMode = "SMALL";
+      Serial.println("OK:OLED font set to small");
+    } else if (fontMode == "LARGE") {
+      oledFontMode = "LARGE";
+      Serial.println("OK:OLED font set to large");
+    } else {
+      oledFontMode = "NORMAL";
+      Serial.println("OK:OLED font set to normal");
+    }
+
+  // ── SD : Info ────────────────────────────────────
+  } else if (cmd == "SD_INFO") {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    uint32_t total = (uint32_t)(SD.totalBytes() / 1024);
+    uint32_t used  = (uint32_t)(SD.usedBytes() / 1024);
+    Serial.print("OK:SD total:");
+    Serial.print(total); Serial.print("KB  used:");
+    Serial.print(used); Serial.print("KB  free:");
+    Serial.print(total - used); Serial.println("KB");
+
+  // ── SD : List directory ──────────────────────────
+  } else if (cmd.startsWith("SD_LIST:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = cmd.substring(8);
+    path.trim();
+    if (path.length() == 0) path = "/";
+    sdListDir(path);
+
+  // ── SD : Read text/JSON file ─────────────────────
+  } else if (cmd.startsWith("SD_READ:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = cmd.substring(8);
+    path.trim();
+    sdReadText(normPath(path));
+
+  // ── SD : Write text/JSON file ────────────────────
+  } else if (cmd.startsWith("SD_WRITE:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    // Format: SD_WRITE:/path/to/file.json:content (newlines encoded as \n)
+    int sep = cmd.indexOf(':', 9);
+    if (sep < 0) { Serial.println("ERR:Bad SD_WRITE format — SD_WRITE:/path:content"); return; }
+    String path    = normPath(cmd.substring(9, sep));
+    String content = cmd.substring(sep + 1);
+    content.replace("\\n", "\n");
+    sdWriteText(path, content);
+
+  // ── SD : Delete file ─────────────────────────────
+  } else if (cmd.startsWith("SD_DELETE:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = normPath(cmd.substring(10));
+    path.trim();
+    if (!SD.exists(path)) {
+      Serial.print("ERR:Not found: "); Serial.println(path); return;
+    }
+    if (SD.remove(path)) {
+      Serial.print("OK:Deleted "); Serial.println(path);
+    } else {
+      Serial.print("ERR:Delete failed: "); Serial.println(path);
+    }
+
+  // ── SD : Read JPEG → base64 ──────────────────────
+  } else if (cmd.startsWith("SD_JPEG:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = normPath(cmd.substring(8));
+    path.trim();
+    sdReadJpeg(path);
+
+  // ── SD : Write JPEG from base64 (chunked) ────────
+  } else if (cmd.startsWith("SD_JPEG_WRITE_START:")) {
+    // Format: SD_JPEG_WRITE_START:/path/file.jpg:expectedByteSize
+    String rest = cmd.substring(20);
+    int sep = rest.lastIndexOf(':');
+    jpegWritePath = normPath((sep < 0) ? rest : rest.substring(0, sep));
+    jpegExpectedSize = (sep < 0) ? 0 : rest.substring(sep + 1).toInt();
+    jpegB64Buffer = "";
+    jpegWriting = true;
+    Serial.print("OK:Ready to receive JPEG for "); Serial.println(jpegWritePath);
+
+  } else if (cmd.startsWith("SD_JPEG_CHUNK:") && jpegWriting) {
+    jpegB64Buffer += cmd.substring(14);
+    // no ACK here — keep receiving
+
+  } else if (cmd == "SD_JPEG_WRITE_END" && jpegWriting) {
+    jpegWriting = false;
+    sdWriteJpegBase64(jpegWritePath, jpegB64Buffer);
+    jpegB64Buffer = "";
+
+  // ── SD : Binary header peek ──────────────────────
+  } else if (cmd.startsWith("SD_HEAD:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = normPath(cmd.substring(8));
+    path.trim();
+    sdReadBinaryHead(path, 256);
+
+  // ── SD : Read WAV binary → base64 → serial ─────
+  } else if (cmd.startsWith("SD_WAV:")) {
+    if (!sdOk) { Serial.println("ERR:SD not available"); return; }
+    String path = normPath(cmd.substring(7));
+    path.trim();
+    sdReadWav(path);
+
+  // ── Camera ──────────────────────────────────────
+  } else if (cmd.startsWith("CAM_CAPTURE")) {
+    if (!cameraOk) { Serial.println("ERR:Camera not available"); return; }
+    // Format: CAM_CAPTURE:RESOLUTION:QUALITY
+    // e.g.  CAM_CAPTURE:VGA:12  or just CAM_CAPTURE (uses current settings)
+    framesize_t  reqSize = FRAMESIZE_VGA;
+    uint8_t      reqQual = 12;
+    if (cmd.length() > 11) {
+      int sep1 = cmd.indexOf(':', 11);
+      int sep2 = (sep1 > 0) ? cmd.indexOf(':', sep1 + 1) : -1;
+      String resStr = (sep1 > 0) ? cmd.substring(12, sep1) : cmd.substring(12);
+      if      (resStr == "240X240") reqSize = FRAMESIZE_240X240;
+      else if (resStr == "QVGA") reqSize = FRAMESIZE_QVGA;
+      else if (resStr == "VGA")  reqSize = FRAMESIZE_VGA;
+      else if (resStr == "SVGA") reqSize = FRAMESIZE_SVGA;
+      else if (resStr == "XGA")  reqSize = FRAMESIZE_XGA;
+      else if (resStr == "SXGA") reqSize = FRAMESIZE_SXGA;
+      else if (resStr == "UXGA") reqSize = FRAMESIZE_UXGA;
+      if (sep2 > 0) reqQual = (uint8_t)cmd.substring(sep2 + 1).toInt();
+    }
+    // Apply settings to sensor
+    sensor_t *s = esp_camera_sensor_get();
+    if (s) {
+      s->set_framesize(s, reqSize);
+      s->set_quality(s, reqQual);
+    }
+    // Discard one stale frame after resolution change
+    camera_fb_t *stale = esp_camera_fb_get();
+    if (stale) esp_camera_fb_return(stale);
+    delay(100);
+    // Capture
+    camCaptureSend();
+
+  // ── Microphone ─────────────────────────────────────
+  } else if (cmd.startsWith("MIC_RECORD:")) {
+    if (!micOk) { Serial.println("ERR:Microphone not available"); return; }
+    // Format: MIC_RECORD:DURATION:GAIN:SAMPLERATE
+    // e.g.  MIC_RECORD:5:2:16000
+    int sep1 = cmd.indexOf(':', 11);
+    int sep2 = (sep1 > 0) ? cmd.indexOf(':', sep1 + 1) : -1;
+    int sep3 = (sep2 > 0) ? cmd.indexOf(':', sep2 + 1) : -1;
+
+    int    reqDur  = 3;
+    int    reqGain = 2;
+    uint32_t reqSR = 16000;
+
+    if (sep1 > 0) reqDur  = cmd.substring(11, sep1).toInt();
+    if (sep2 > 0) reqGain = cmd.substring(sep1 + 1, sep2).toInt();
+    if (sep3 > 0) reqSR   = (uint32_t)cmd.substring(sep2 + 1, sep3).toInt();
+    else if (sep2 > 0) reqSR = (uint32_t)cmd.substring(sep2 + 1).toInt();
+
+    // Clamp to safe values
+    if (reqDur  < 1)  reqDur  = 1;
+    if (reqDur  > 30) reqDur  = 30;
+    if (reqGain < 1)  reqGain = 1;
+    if (reqGain > 8)  reqGain = 8;
+
+    // Reinit I2S if sample rate changed
+    if (reqSR != micSampleRate) {
+      i2s.end();
+      micSampleRate = reqSR;
+      i2s.setPinsPdmRx(42, 41);
+      micOk = i2s.begin(I2S_MODE_PDM_RX, micSampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+      if (!micOk) { Serial.println("ERR:Microphone reinit failed"); return; }
+      delay(100);  // let I2S settle
+    }
+
+    micRecordAndSend(reqDur, reqGain);
+
+  } else {
+    Serial.print("ERR:Unknown command: "); Serial.println(cmd);
+  }
+}
+
+// ─────────────────────────────────────────────────────
+//  IMU
+// ─────────────────────────────────────────────────────
+void sendImuLine() {
+  // Format: IMU:ax,ay,az,gx,gy,gz,tempC
+  Serial.print("IMU:");
+  Serial.print(imu.readFloatAccelX(), 3); Serial.print(",");
+  Serial.print(imu.readFloatAccelY(), 3); Serial.print(",");
+  Serial.print(imu.readFloatAccelZ(), 3); Serial.print(",");
+  Serial.print(imu.readFloatGyroX(),  3); Serial.print(",");
+  Serial.print(imu.readFloatGyroY(),  3); Serial.print(",");
+  Serial.print(imu.readFloatGyroZ(),  3); Serial.print(",");
+  Serial.println(imu.readTempC(), 1);
+}
+
+// ─────────────────────────────────────────────────────
+//  OLED  (U8g2 · u8g2_font_ncenB10_tr · U8G2_R2)
+//
+//  Key U8g2 differences from Adafruit SSD1306:
+//    - setCursor(x, y): y is the TEXT BASELINE, not the top of the character.
+//      With ncenB10_tr (~10px cap-height): three lines fit at y = 12, 26, 38
+//      using a 14px line gap, or y = 10, 22, 34 with a 12px gap (slightly tighter).
+//    - Page-buffer mode (_1_): ALL drawing must happen inside firstPage/nextPage.
+//      There is no separate display() call — the loop handles it.
+//    - U8G2_R2 rotates 180° — u8g2 handles the transform transparently.
+// ─────────────────────────────────────────────────────
+
+void oledMessage(const String& msg) {
+  // Splits on '\n' — draws up to 3 lines (normal), 4 lines (small), or 1 line (large)
+  u8g2.firstPage();
+  do {
+    if (oledFontMode == "SMALL") {
+      // u8g2_font_6x10_tr: ~6px wide, 10px tall — fits 4 lines at y=9,19,29,39
+      u8g2.setFont(u8g2_font_6x10_tr);
+      const int yPos[] = {9, 19, 29, 39};
+      int lineNum = 0, lineStart = 0;
+      while (lineStart <= (int)msg.length() && lineNum < 4) {
+        int nl = msg.indexOf('\n', lineStart);
+        String line = (nl < 0) ? msg.substring(lineStart) : msg.substring(lineStart, nl);
+        u8g2.setCursor(2, yPos[lineNum]);
+        u8g2.print(line);
+        lineStart = (nl < 0) ? msg.length() + 1 : nl + 1;
+        lineNum++;
+      }
+    } else if (oledFontMode == "LARGE") {
+      // u8g2_font_ncenB14_tr: ~14px tall — fits 2 lines at y=16, 36
+      u8g2.setFont(u8g2_font_ncenB14_tr);
+      const int yPos[] = {16, 36};
+      int lineNum = 0, lineStart = 0;
+      while (lineStart <= (int)msg.length() && lineNum < 2) {
+        int nl = msg.indexOf('\n', lineStart);
+        String line = (nl < 0) ? msg.substring(lineStart) : msg.substring(lineStart, nl);
+        u8g2.setCursor(1, yPos[lineNum]);
+        u8g2.print(line);
+        lineStart = (nl < 0) ? msg.length() + 1 : nl + 1;
+        lineNum++;
+      }
+    } else {
+      // NORMAL: u8g2_font_ncenB10_tr — 3 lines at y=12, 26, 38
+      u8g2.setFont(u8g2_font_ncenB10_tr);
+      const int yPos[] = {12, 26, 38};
+      int lineNum = 0, lineStart = 0;
+      while (lineStart <= (int)msg.length() && lineNum < 3) {
+        int nl = msg.indexOf('\n', lineStart);
+        String line = (nl < 0) ? msg.substring(lineStart) : msg.substring(lineStart, nl);
+        u8g2.setCursor(3, yPos[lineNum]);
+        u8g2.print(line);
+        lineStart = (nl < 0) ? msg.length() + 1 : nl + 1;
+        lineNum++;
+      }
+    }
+  } while (u8g2.nextPage());
+}
+
+void oledShowIMU() {
+  char buf[14];
+  u8g2.firstPage();
+  do {
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    snprintf(buf, sizeof(buf), "X:%.2f", imu.readFloatAccelX());
+    u8g2.setCursor(1, 12); u8g2.print(buf);
+    snprintf(buf, sizeof(buf), "Y:%.2f", imu.readFloatAccelY());
+    u8g2.setCursor(1, 26); u8g2.print(buf);
+    snprintf(buf, sizeof(buf), "Z:%.2f", imu.readFloatAccelZ());
+    u8g2.setCursor(1, 38); u8g2.print(buf);
+  } while (u8g2.nextPage());
+}
+
+void oledShowStatus() {
+  u8g2.firstPage();
+  do {
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.setCursor(1, 12); u8g2.print(imuOk ? "IMU:OK"  : "IMU:ERR");
+    u8g2.setCursor(1, 26); u8g2.print(sdOk  ? "SD: OK"  : "SD: ERR");
+    u8g2.setCursor(1, 38); u8g2.print("UP:");
+    u8g2.print(millis() / 1000); u8g2.print("s");
+  } while (u8g2.nextPage());
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : List directory
+//  Output format (for webSerial01.html parser):
+//    SD_LIST_START
+//    SD_FILE:name,sizeInBytes,F      (file)
+//    SD_FILE:name,0,D                (directory)
+//    SD_LIST_END:/path
+// ─────────────────────────────────────────────────────
+void sdListDir(const String& path) {
+  File root = SD.open(path);
+  if (!root || !root.isDirectory()) {
+    Serial.print("ERR:Cannot open directory: "); Serial.println(path);
+    return;
+  }
+  Serial.println("SD_LIST_START");
+  while (true) {
+    File entry = root.openNextFile();
+    if (!entry) break;
+    Serial.print("SD_FILE:");
+    Serial.print(entry.name());   // just the entry name, not full path
+    Serial.print(",");
+    Serial.print(entry.isDirectory() ? 0 : (uint32_t)entry.size());
+    Serial.print(",");
+    Serial.println(entry.isDirectory() ? "D" : "F");
+    entry.close();
+  }
+  root.close();
+  Serial.print("SD_LIST_END:"); Serial.println(path);
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Read text / JSON file
+//  Output:
+//    SD_CONTENT_START
+//    SD_LINE:<line content>
+//    ...
+//    SD_CONTENT_END
+// ─────────────────────────────────────────────────────
+void sdReadText(const String& path) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) {
+    Serial.print("ERR:Cannot open: "); Serial.println(path); return;
+  }
+  Serial.println("SD_CONTENT_START");
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    // Remove trailing \r if present
+    if (line.endsWith("\r")) line.remove(line.length() - 1);
+    Serial.print("SD_LINE:");
+    Serial.println(line);
+  }
+  f.close();
+  Serial.println("SD_CONTENT_END");
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Write text / JSON file
+// ─────────────────────────────────────────────────────
+void sdWriteText(const String& path, const String& content) {
+  // Ensure parent directory exists
+  ensureParentDir(path);
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    Serial.print("ERR:Cannot create: "); Serial.println(path); return;
+  }
+  f.print(content);
+  f.close();
+  Serial.print("OK:Written "); Serial.print(content.length()); Serial.print("B to "); Serial.println(path);
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Read JPEG → base64 → serial
+//  Output:
+//    SD_JPEG_START
+//    SD_JPEG:<base64 chunk, ~60 chars>
+//    ...
+//    SD_JPEG_END
+//
+//  NOTE: Large JPEGs (>50KB) may be slow over 115200 baud.
+//        Images from OV2640 camera on XIAO ESP32S3 at 96x96
+//        are typically 3–8 KB — fast to transfer.
+// ─────────────────────────────────────────────────────
+void sdReadJpeg(const String& path) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) {
+    Serial.print("ERR:Cannot open JPEG: "); Serial.println(path); return;
+  }
+  uint32_t fsize = f.size();
+  if (fsize == 0) {
+    f.close(); Serial.println("ERR:Empty JPEG file"); return;
+  }
+
+  // Read file into buffer
+  uint8_t* buf = (uint8_t*)malloc(fsize);
+  if (!buf) {
+    f.close();
+    Serial.println("ERR:Not enough RAM to buffer JPEG. Try smaller image.");
+    return;
+  }
+  f.readBytes((char*)buf, fsize);
+  f.close();
+
+  // Encode to base64 using mbedtls (built into ESP32 SDK)
+  size_t outLen = 0;
+  mbedtls_base64_encode(nullptr, 0, &outLen, buf, fsize); // get required length
+  uint8_t* b64buf = (uint8_t*)malloc(outLen + 1);
+  if (!b64buf) {
+    free(buf);
+    Serial.println("ERR:Not enough RAM for base64 buffer");
+    return;
+  }
+  mbedtls_base64_encode(b64buf, outLen + 1, &outLen, buf, fsize);
+  free(buf);
+  b64buf[outLen] = 0;
+
+  // Send in 60-char chunks so serial buffer doesn't overflow
+  Serial.println("SD_JPEG_START");
+  const int CHUNK = 60;
+  for (size_t i = 0; i < outLen; i += CHUNK) {
+    Serial.print("SD_JPEG:");
+    size_t end = min(i + (size_t)CHUNK, outLen);
+    for (size_t j = i; j < end; j++) Serial.print((char)b64buf[j]);
+    Serial.println();
+    delay(1); // small yield to avoid WDT
+  }
+  Serial.println("SD_JPEG_END");
+  free(b64buf);
+  Serial.print("OK:JPEG sent "); Serial.print(fsize); Serial.println("B");
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Read WAV (or any binary) → base64 → serial
+//
+//  Protocol output:
+//    SD_WAV_START
+//    SD_WAV:<base64 chunk, 60 chars>
+//    ...
+//    SD_WAV_END
+//    OK:WAV sent NNNNb
+//
+//  This reuses the same base64-over-serial approach as sdReadJpeg().
+//  The web page receives the chunks, reassembles them, decodes the
+//  WAV bytes, and passes them to the microphone playback UI.
+// ─────────────────────────────────────────────────────
+void sdReadWav(const String& path) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) {
+    Serial.print("ERR:Cannot open WAV: "); Serial.println(path); return;
+  }
+  uint32_t fsize = f.size();
+  if (fsize == 0) {
+    f.close(); Serial.println("ERR:Empty WAV file"); return;
+  }
+
+  // Read file into buffer — WAV files fit in PSRAM (max ~160 KB for 5s@16kHz)
+  uint8_t* buf = (uint8_t*)malloc(fsize);
+  if (!buf) {
+    f.close();
+    Serial.println("ERR:Not enough RAM to buffer WAV. Try ps_malloc or smaller file.");
+    return;
+  }
+  f.readBytes((char*)buf, fsize);
+  f.close();
+
+  // Base64 encode
+  size_t outLen = 0;
+  mbedtls_base64_encode(nullptr, 0, &outLen, buf, fsize);
+  uint8_t* b64buf = (uint8_t*)malloc(outLen + 1);
+  if (!b64buf) {
+    free(buf);
+    Serial.println("ERR:Not enough RAM for base64 buffer");
+    return;
+  }
+  mbedtls_base64_encode(b64buf, outLen + 1, &outLen, buf, fsize);
+  free(buf);
+  b64buf[outLen] = 0;
+
+  // Stream to serial in 60-char chunks
+  Serial.println("SD_WAV_START");
+  const int CHUNK = 60;
+  for (size_t i = 0; i < outLen; i += CHUNK) {
+    Serial.print("SD_WAV:");
+    size_t end = min(i + (size_t)CHUNK, outLen);
+    for (size_t j = i; j < end; j++) Serial.print((char)b64buf[j]);
+    Serial.println();
+    delay(1);
+  }
+  Serial.println("SD_WAV_END");
+  free(b64buf);
+  Serial.print("OK:WAV sent "); Serial.print(fsize); Serial.println("B");
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Write JPEG from base64 string
+// ─────────────────────────────────────────────────────
+void sdWriteJpegBase64(const String& path, const String& b64) {
+  ensureParentDir(path);
+  size_t b64Len = b64.length();
+  size_t outLen = 0;
+  mbedtls_base64_decode(nullptr, 0, &outLen, (const uint8_t*)b64.c_str(), b64Len);
+
+  uint8_t* buf = (uint8_t*)malloc(outLen);
+  if (!buf) {
+    Serial.println("ERR:Not enough RAM to decode JPEG");
+    return;
+  }
+  int ret = mbedtls_base64_decode(buf, outLen, &outLen, (const uint8_t*)b64.c_str(), b64Len);
+  if (ret != 0) {
+    free(buf);
+    Serial.println("ERR:Base64 decode failed");
+    return;
+  }
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    free(buf);
+    Serial.print("ERR:Cannot create: "); Serial.println(path);
+    return;
+  }
+  f.write(buf, outLen);
+  f.close();
+  free(buf);
+  Serial.print("OK:JPEG written "); Serial.print(outLen); Serial.print("B to "); Serial.println(path);
+}
+
+// ─────────────────────────────────────────────────────
+//  SD : Binary file header peek
+//  Reads first `numBytes` bytes, prints printable ASCII
+//  Output:
+//    SD_CONTENT_START
+//    SD_LINE:<hex dump line>
+//    ...
+//    SD_CONTENT_END
+// ─────────────────────────────────────────────────────
+void sdReadBinaryHead(const String& path, uint16_t numBytes) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) {
+    Serial.print("ERR:Cannot open: "); Serial.println(path); return;
+  }
+  Serial.println("SD_CONTENT_START");
+  Serial.print("SD_LINE:"); Serial.print("Binary file: "); Serial.print(path);
+  Serial.print("  size:"); Serial.print((uint32_t)f.size()); Serial.println("B");
+  Serial.println("SD_LINE:--- First 256 bytes (hex + ASCII) ---");
+
+  uint8_t row[16];
+  uint16_t totalRead = 0;
+  while (f.available() && totalRead < numBytes) {
+    uint8_t count = 0;
+    while (f.available() && count < 16 && totalRead < numBytes) {
+      row[count++] = f.read();
+      totalRead++;
+    }
+    // Print hex line
+    Serial.print("SD_LINE:");
+    char hex[6];
+    snprintf(hex, sizeof(hex), "%04X  ", totalRead - count);
+    Serial.print(hex);
+    for (uint8_t i = 0; i < 16; i++) {
+      if (i < count) {
+        snprintf(hex, sizeof(hex), "%02X ", row[i]);
+        Serial.print(hex);
+      } else {
+        Serial.print("   ");
+      }
+      if (i == 7) Serial.print(" ");
+    }
+    Serial.print(" |");
+    for (uint8_t i = 0; i < count; i++) {
+      Serial.print((char)(row[i] >= 32 && row[i] < 127 ? row[i] : '.'));
+    }
+    Serial.println("|");
+  }
+  Serial.println("SD_CONTENT_END");
+  f.close();
+}
+
+// ─────────────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────────────
+
+// Ensure path has leading slash
+String normPath(String p) {
+  p.trim();
+  if (!p.startsWith("/")) p = "/" + p;
+  return p;
+}
+
+// Create parent directory if it doesn't exist
+void ensureParentDir(const String& path) {
+  int lastSlash = path.lastIndexOf('/');
+  if (lastSlash > 0) {
+    String dir = path.substring(0, lastSlash);
+    if (!SD.exists(dir)) {
+      SD.mkdir(dir);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────
+//  Microphone : Record WAV and send over serial as base64
+//
+//  Protocol output (during/after recording):
+//    MIC_LEVEL:<0-32767>      — nominal level line (sent once before record)
+//    MIC_WAV_START
+//    MIC_WAV:<base64 chunk, 60 chars>
+//    ...
+//    MIC_WAV_END
+//    OK:Mic sent NNNNb NNs
+//
+//  NOTE: i2s.recordWAV() is BLOCKING for the full duration.
+//  The WAV buffer is allocated in PSRAM by the library.
+//  Base64 encoding uses a heap buffer (approx 4/3 × WAV size).
+//  A 5s 16kHz mono recording = 44 + 5×16000×2 = 160,044 B raw
+//  → ~213,392 B base64 → ~3556 chunks of 60 chars
+//  → ~19 seconds transfer time at 115200 baud.
+//  Use 8kHz / shorter durations for faster serial round-trips.
+// ─────────────────────────────────────────────────────
+void micRecordAndSend(int durationSec, int gain) {
+  Serial.print("OK:Recording "); Serial.print(durationSec);
+  Serial.print("s at "); Serial.print(micSampleRate);
+  Serial.println("Hz...");
+
+  // Emit a nominal MIC_LEVEL so the webpage VU bar shows something
+  Serial.println("MIC_LEVEL:4096");
+
+  // Record — this BLOCKS for durationSec seconds
+  uint8_t *wavBuf = nullptr;
+  size_t   wavSize = 0;
+  wavBuf = i2s.recordWAV(durationSec, &wavSize);
+
+  if (!wavBuf || wavSize < 44) {
+    Serial.println("ERR:recordWAV failed or returned empty buffer");
+    if (wavBuf) free(wavBuf);
+    return;
+  }
+
+  // Apply gain — multiply each int16 PCM sample (skipping the 44-byte header)
+  // Clamp to int16 range to prevent wrap-around distortion.
+  if (gain > 1) {
+    int16_t *pcm = (int16_t *)(wavBuf + 44);
+    size_t   numSamples = (wavSize - 44) / 2;
+    for (size_t i = 0; i < numSamples; i++) {
+      int32_t s = (int32_t)pcm[i] * gain;
+      if (s >  32767) s =  32767;
+      if (s < -32768) s = -32768;
+      pcm[i] = (int16_t)s;
+    }
+  }
+
+  // Report peak level so VU meter shows something meaningful
+  {
+    int16_t *pcm = (int16_t *)(wavBuf + 44);
+    size_t   n   = (wavSize - 44) / 2;
+    int16_t  peak = 0;
+    for (size_t i = 0; i < n; i++) {
+      int16_t v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+      if (v > peak) peak = v;
+    }
+    Serial.print("MIC_LEVEL:"); Serial.println(peak);
+  }
+
+  // Base64 encode
+  size_t b64Len = 0;
+  mbedtls_base64_encode(nullptr, 0, &b64Len, wavBuf, wavSize);
+  uint8_t *b64buf = (uint8_t *)malloc(b64Len + 1);
+  if (!b64buf) {
+    free(wavBuf);
+    Serial.println("ERR:Not enough RAM for base64 encode of WAV");
+    return;
+  }
+  mbedtls_base64_encode(b64buf, b64Len + 1, &b64Len, wavBuf, wavSize);
+  free(wavBuf);  // release WAV PSRAM buffer immediately
+  b64buf[b64Len] = 0;
+
+  // Stream to serial
+  Serial.println("MIC_WAV_START");
+  const int CHUNK = 60;
+  for (size_t i = 0; i < b64Len; i += CHUNK) {
+    Serial.print("MIC_WAV:");
+    size_t end = min(i + (size_t)CHUNK, b64Len);
+    for (size_t j = i; j < end; j++) Serial.print((char)b64buf[j]);
+    Serial.println();
+    delay(1);  // yield — prevents WDT on long recordings
+  }
+  Serial.println("MIC_WAV_END");
+  free(b64buf);
+  Serial.print("OK:Mic sent "); Serial.print(wavSize);
+  Serial.print("b "); Serial.print(durationSec); Serial.println("s");
+}
+
+// ─────────────────────────────────────────────────────
+//  Camera : Capture and send JPEG over serial as base64
+//
+//  Protocol output:
+//    CAM_JPEG_START
+//    CAM_JPEG:<base64 chunk, 60 chars>
+//    ...
+//    CAM_JPEG_END
+//    OK:Camera sent NNNNb
+//
+//  Memory: frame buffer in PSRAM, base64 buffer in heap.
+//  A VGA JPEG at quality 12 is typically 15–40 KB raw,
+//  ~20–55 KB base64. At 115200 baud that's ~2–6 seconds.
+//  QVGA is ~4× faster and still enough for tinyML class preview.
+// ─────────────────────────────────────────────────────
+void camCaptureSend() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("ERR:Camera frame capture failed");
+    return;
+  }
+  if (fb->format != PIXFORMAT_JPEG) {
+    esp_camera_fb_return(fb);
+    Serial.println("ERR:Camera not in JPEG mode");
+    return;
+  }
+
+  uint32_t fsize = fb->len;
+
+  // Encode to base64 using mbedtls — same approach as sdReadJpeg()
+  size_t outLen = 0;
+  mbedtls_base64_encode(nullptr, 0, &outLen, fb->buf, fsize);
+  uint8_t *b64buf = (uint8_t *)malloc(outLen + 1);
+  if (!b64buf) {
+    esp_camera_fb_return(fb);
+    Serial.println("ERR:Not enough RAM for base64 encode");
+    return;
+  }
+  mbedtls_base64_encode(b64buf, outLen + 1, &outLen, fb->buf, fsize);
+  esp_camera_fb_return(fb);  // release frame buffer ASAP — free PSRAM
+  b64buf[outLen] = 0;
+
+  // Stream to serial in 60-char chunks
+  Serial.println("CAM_JPEG_START");
+  const int CHUNK = 60;
+  for (size_t i = 0; i < outLen; i += CHUNK) {
+    Serial.print("CAM_JPEG:");
+    size_t end = min(i + (size_t)CHUNK, outLen);
+    for (size_t j = i; j < end; j++) Serial.print((char)b64buf[j]);
+    Serial.println();
+    delay(1);  // yield to avoid WDT reset during long transfers
+  }
+  Serial.println("CAM_JPEG_END");
+  free(b64buf);
+  Serial.print("OK:Camera sent "); Serial.print(fsize); Serial.println("b");
+}
+
+void printStatus() {
+  Serial.println("OK:=== XIAO ESP32S3 Status ===");
+  Serial.print("OK:IMU  LSM6DS3: "); Serial.println(imuOk    ? "OK" : "FAIL");
+  Serial.print("OK:OLED U8g2:    "); Serial.println(oledOk   ? "OK" : "FAIL");
+  Serial.print("OK:SD   Card:    "); Serial.println(sdOk     ? "OK" : "FAIL");
+  Serial.print("OK:Camera OV2640:"); Serial.println(cameraOk ? "OK" : "FAIL");
+  Serial.print("OK:Mic PDM:      "); Serial.println(micOk     ? "OK" : "FAIL");
+  Serial.print("OK:Free heap:    "); Serial.print(ESP.getFreeHeap()); Serial.println(" bytes");
+  Serial.print("OK:CPU freq:     "); Serial.print(getCpuFrequencyMhz()); Serial.println(" MHz");
+  Serial.print("OK:Uptime:       "); Serial.print(millis() / 1000); Serial.println(" s");
+  Serial.println("OK:=============================");
+}
+
+void printHelp() {
+  Serial.println("OK:=== XIAO ESP32S3 Command Reference ===");
+  Serial.println("OK: --- System ---");
+  Serial.println("OK:  PING                         -> OK:PONG");
+  Serial.println("OK:  STATUS                       -> hardware status summary");
+  Serial.println("OK:  HEAP                         -> free heap bytes");
+  Serial.println("OK:  RESET                        -> restart the device");
+  Serial.println("OK: --- IMU (LSM6DS3) ---");
+  Serial.println("OK:  IMU                          -> single accel/gyro/temp reading");
+  Serial.println("OK:  IMU_STREAM                   -> stream IMU at 20 Hz until IMU_STOP");
+  Serial.println("OK:  IMU_STOP                     -> stop IMU stream");
+  Serial.println("OK: --- OLED (72x40 SSD1306) ---");
+  Serial.println("OK:  OLED:<text>                  -> display message (use \n for newline, up to 3 lines)");
+  Serial.println("OK:  OLED_CLEAR                   -> blank the display");
+  Serial.println("OK:  OLED_IMU                     -> live accel X/Y/Z on OLED (starts IMU stream)");
+  Serial.println("OK:  OLED_STATUS                  -> show IMU/SD/uptime status");
+  Serial.println("OK:  OLED_FONT:<NORMAL|SMALL|LARGE> -> set font size for OLED: messages");
+  Serial.println("OK: --- SD Card ---");
+  Serial.println("OK:  SD_INFO                      -> total/used/free KB");
+  Serial.println("OK:  SD_LIST:<path>               -> list directory  e.g. SD_LIST:/images/");
+  Serial.println("OK:  SD_READ:<path>               -> read text/JSON file");
+  Serial.println("OK:  SD_WRITE:<path>:<content>    -> write text file (\n for newlines)");
+  Serial.println("OK:  SD_DELETE:<path>             -> delete file");
+  Serial.println("OK:  SD_JPEG:<path>               -> read JPEG -> base64 stream");
+  Serial.println("OK:  SD_WAV:<path>                -> read WAV  -> base64 stream");
+  Serial.println("OK:  SD_HEAD:<path>               -> hex dump first 256 bytes of any file");
+  Serial.println("OK:  SD_JPEG_WRITE_START:<path>:<size> -> begin receiving JPEG base64");
+  Serial.println("OK:  SD_JPEG_CHUNK:<base64data>   -> send a chunk (repeat until done)");
+  Serial.println("OK:  SD_JPEG_WRITE_END            -> finalize write");
+  Serial.println("OK: --- Camera (OV2640) ---");
+  Serial.println("OK:  CAM_CAPTURE:<RES>:<quality>  -> capture JPEG e.g. CAM_CAPTURE:240X240:12");
+  Serial.println("OK:    Resolutions: 240X240 QVGA VGA SVGA XGA SXGA UXGA");
+  Serial.println("OK:    Quality: 4 (best) to 63 (worst) — default 12");
+  Serial.println("OK: --- Microphone (PDM) ---");
+  Serial.println("OK:  MIC_RECORD:<sec>:<gain>:<hz> -> record WAV e.g. MIC_RECORD:3:2:16000");
+  Serial.println("OK:    Duration: 1-30 s  Gain: 1-8  Sample rate: 8000|16000|22050|44100");
+  Serial.println("OK:=========================================");
+}
+
+// ─────────────────────────────────────────────────────
+//  NOTES
+// ─────────────────────────────────────────────────────
+/*
+  JPEG MEMORY LIMITS:
+  The ESP32S3 has ~320KB SRAM (some reserved by WiFi stack etc).
+  Practical free heap at startup is usually ~250-280KB.
+  At 115200 baud, 10KB JPEG base64 (~13.3KB encoded) takes ~1.2 sec.
+  For 96x96 greyscale JPEGs (typical for tinyML image classification)
+  files are usually 2-6 KB — very fast.
+
+  SD CARD WIRING (XIAO ESP32S3 Sense onboard):
+    CS=21  MOSI=9  MISO=8  SCK=7
+  The SD library will use the default VSPI/HSPI SPI bus.
+  If the XIAOml expansion board uses a different SD slot/CS pin,
+  update SD_CS accordingly.
+
+  LSM6DS3 I2C ADDRESS:
+  Default is 0x6A. If SDO/SA0 pin is pulled high, address is 0x6B.
+  Update: LSM6DS3 imu(I2C_MODE, 0x6B); if needed.
+
+  OLED LIBRARY — U8g2:
+  Using U8G2_SSD1306_72X40_ER_1_HW_I2C with U8G2_R2 (180° rotation).
+  This matches the camera/data-collection sketch exactly, so both sketches
+  produce identical physical display output.
+  Page-buffer mode (_1_): ~25 bytes RAM overhead, requires firstPage/nextPage loop.
+  Full-buffer mode (_F_): ~360 bytes RAM, allows direct setCursor/print without loop.
+  I2C address 0x3C is standard for this display. If your screen stays blank,
+  try 0x3D by changing U8X8_PIN_NONE to your reset pin (or keep NONE if none).
+
+  CAMERA (OV2640 — XIAO ESP32S3 Sense):
+  IMPORTANT: Must compile with Tools → PSRAM → "OPI PSRAM".
+  Without PSRAM, camera is limited to SVGA and serial transfer will be slow.
+  With OPI PSRAM the frame buffer lives in PSRAM (~8MB), leaving heap free for base64.
+  Transfer times at 115200 baud (approximate):
+    QVGA 320×240  quality 12 → ~5–12 KB → ~1–2 sec
+    VGA  640×480  quality 12 → ~15–40 KB → ~3–7 sec
+    SVGA 800×600  quality 12 → ~25–60 KB → ~5–10 sec
+  The sketch warms up the sensor with 3 discarded frames at startup so
+  auto-exposure settles before the first real capture.
+  Supported JPEG frame sizes (XIAO ESP32S3 Sense / OV2640):
+    QVGA, CIF, VGA, SVGA, XGA, SXGA, UXGA
+
+  MICROPHONE (PDM — XIAO ESP32S3 Sense):
+  Pins: CLK=42, DATA=41 (fixed on the Sense variant, not user-configurable).
+  Library: ESP_I2S by Seeed Studio — install from Library Manager.
+  recordWAV() blocks for the full duration; no streaming during recording.
+  Memory: WAV buffer allocated in PSRAM; base64 buffer in heap.
+  Approximate transfer times at 115200 baud:
+    3s  8kHz  → ~48 KB raw → ~64 KB b64  → ~6s transfer
+    3s  16kHz → ~96 KB raw → ~128 KB b64 → ~11s transfer
+    5s  8kHz  → ~80 KB raw → ~107 KB b64 → ~9s transfer
+    5s  16kHz → ~160 KB raw → ~214 KB b64 → ~19s transfer
+  Tip: Use 8kHz for tinyML keyword spotting (Edge Impulse default is 16kHz
+  but 8kHz works for most voice commands and is 2× faster to transfer).
+  Gain: int16 samples are multiplied before encoding. Gain 1 = unity.
+  Values 2-4 are useful for quiet environments. Clips at ±32767.
+  Build settings: Tools → PSRAM → "OPI PSRAM" (required for camera too).
+                  Tools → USB CDC on Boot → "Enabled"
+*/
+
+// END OF SKETCH
