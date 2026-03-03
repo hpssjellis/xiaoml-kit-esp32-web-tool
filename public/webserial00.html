@@ -1,0 +1,2157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XIAO ESP32S3 · WebSerial Lab</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;800&display=swap');
+
+:root {
+  --bg:#090d12; --surf:#0e1520; --surf2:#131d2a; --border:#1c2e42;
+  --accent:#00d4ff; --accent2:#ff7c38; --green:#2ecc71; --red:#e74c3c;
+  --yellow:#f1c40f; --text:#ccdde8; --dim:#486070;
+  --glow:0 0 14px rgba(0,212,255,.4); --glow2:0 0 14px rgba(255,124,56,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;min-height:100vh;display:flex;flex-direction:column;}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);}
+
+/* HEADER */
+header{display:flex;align-items:center;gap:16px;padding:12px 22px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,#0b1520 0%,transparent 100%);flex-shrink:0;}
+.logo{font-family:'Exo 2',sans-serif;font-weight:800;font-size:1.15rem;color:var(--accent);text-shadow:var(--glow);letter-spacing:.07em;}
+.logo span{color:var(--accent2);text-shadow:var(--glow2);}
+.sub{font-size:.65rem;color:var(--dim);letter-spacing:.14em;text-transform:uppercase;margin-top:2px;}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:14px;}
+.status-pill{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:.72rem;}
+#dot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);transition:.3s;}
+#dot.on{background:var(--green);box-shadow:0 0 8px var(--green);}
+#stlbl{color:var(--dim);}
+
+/* LAYOUT */
+.workspace{display:grid;grid-template-columns:240px 1fr 300px;flex:1;overflow:hidden;min-height:0;}
+@media(max-width:900px){.workspace{grid-template-columns:1fr;}}
+
+/* SIDEBAR */
+.sidebar{border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.center{display:flex;flex-direction:column;overflow:hidden;}
+.sd-panel{border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+
+/* CARD */
+.card{background:var(--surf);border-bottom:1px solid var(--border);padding:12px 14px;}
+.card-title{font-family:'Exo 2',sans-serif;font-weight:600;font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+.card-title .badge{font-family:'Share Tech Mono',monospace;font-weight:400;font-size:.6rem;color:var(--dim);border:1px solid var(--border);padding:1px 6px;border-radius:2px;margin-left:6px;vertical-align:middle;}
+
+/* CONTROLS */
+select,input[type=text],input[type=number]{background:#08111a;border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.76rem;padding:7px 10px;border-radius:3px;outline:none;width:100%;}
+select:focus,input:focus{border-color:var(--accent);}
+label.lbl{font-size:.65rem;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:4px;}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+
+/* BUTTONS */
+.btn{background:transparent;border:1px solid var(--border);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:.72rem;padding:7px 12px;cursor:pointer;border-radius:3px;letter-spacing:.07em;text-transform:uppercase;transition:.15s;white-space:nowrap;}
+.btn:hover{background:rgba(0,212,255,.1);border-color:var(--accent);}
+.btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{opacity:.85;box-shadow:var(--glow);}
+.btn.orange{background:var(--accent2);color:#000;border-color:var(--accent2);font-weight:700;}
+.btn.orange:hover{opacity:.85;box-shadow:var(--glow2);}
+.btn.red{color:var(--red);border-color:var(--red);}
+.btn.red:hover{background:rgba(231,76,60,.12);}
+.btn.green{color:var(--green);border-color:var(--green);}
+.btn.green:hover{background:rgba(46,204,113,.1);}
+.btn.ghost{color:var(--dim);}
+.btn.ghost:hover{color:var(--text);border-color:var(--dim);}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+.btn.sm{padding:4px 10px;font-size:.66rem;}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* TABS */
+.tab-bar{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surf);}
+.tab{padding:10px 18px;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;color:var(--dim);transition:.15s;user-select:none;white-space:nowrap;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tab-content{flex:1;overflow:hidden;display:flex;flex-direction:column;}
+.tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column;}
+.tab-pane.active{display:flex;}
+
+/* TERMINAL */
+#terminal{flex:1;overflow-y:auto;padding:12px 14px;font-size:.76rem;line-height:1.65;background:#050b10;color:#7ab8d4;word-break:break-all;min-height:0;}
+#terminal .rx{color:#7ab8d4;}
+#terminal .tx{color:var(--accent2);}
+#terminal .sys{color:var(--dim);font-style:italic;}
+#terminal .ok{color:var(--green);}
+#terminal .err{color:var(--red);}
+#terminal .warn{color:var(--yellow);}
+.term-input-bar{display:flex;border-top:1px solid var(--border);flex-shrink:0;}
+.term-input-bar input{flex:1;background:#08111a;border:none;border-radius:0;padding:10px 14px;font-size:.78rem;color:var(--text);font-family:'Share Tech Mono',monospace;outline:none;}
+.term-input-bar .btn{border-radius:0;border:none;border-left:1px solid var(--border);}
+.quick-bar{display:flex;flex-wrap:wrap;gap:5px;padding:8px 12px;border-top:1px solid var(--border);background:var(--surf);flex-shrink:0;}
+.qb{background:rgba(0,212,255,.06);border:1px solid var(--border);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:.64rem;padding:4px 9px;cursor:pointer;border-radius:2px;transition:.12s;letter-spacing:.04em;}
+.qb:hover{background:rgba(0,212,255,.18);border-color:var(--accent);}
+
+/* FLASH */
+.flash-wrap{padding:16px;overflow-y:auto;flex:1;}
+.flash-option{border:1px solid var(--border);border-radius:5px;padding:14px;margin-bottom:12px;cursor:pointer;transition:.2s;}
+.flash-option:hover{border-color:rgba(0,212,255,.4);}
+.flash-option.sel{border-color:var(--accent);background:rgba(0,212,255,.05);}
+.flash-option h3{font-family:'Exo 2',sans-serif;font-size:.86rem;color:var(--accent);margin-bottom:6px;font-weight:600;}
+.flash-option p{font-size:.68rem;color:var(--dim);line-height:1.55;margin-bottom:10px;}
+.frow{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.flbl{font-size:.65rem;color:var(--dim);width:100px;flex-shrink:0;text-transform:uppercase;letter-spacing:.07em;}
+.frow input[type=file]{flex:1;background:#08111a;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:.68rem;padding:5px 8px;border-radius:3px;}
+.frow input[type=text]{width:80px;}
+.prog-wrap{height:4px;background:var(--border);border-radius:2px;margin:8px 0;overflow:hidden;display:none;}
+.prog-bar{height:100%;background:var(--accent);width:0%;transition:width .2s;box-shadow:var(--glow);}
+
+/* IMU */
+.imu-wrap{padding:14px;overflow-y:auto;flex:1;}
+.imu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
+.imu-cell{background:#050b10;border:1px solid var(--border);border-radius:4px;padding:10px 6px;text-align:center;}
+.imu-axis{font-size:.6rem;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px;}
+.imu-val{font-family:'Exo 2',sans-serif;font-size:1.1rem;font-weight:600;color:var(--accent);}
+.imu-unit{font-size:.58rem;color:var(--dim);margin-top:2px;}
+
+/* SD PANEL */
+.sd-top{padding:9px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-shrink:0;background:var(--surf);}
+.sd-top .card-title{margin-bottom:0;}
+.breadcrumb{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding:5px 10px;border-bottom:1px solid var(--border);background:#08111a;font-size:.68rem;flex-shrink:0;min-height:26px;}
+.bc-item{color:var(--accent);cursor:pointer;padding:1px 3px;}
+.bc-item:hover{text-decoration:underline;}
+.bc-sep{color:var(--dim);}
+.sd-list{flex:1;overflow-y:auto;min-height:0;}
+.sd-entry{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;border-bottom:1px solid rgba(28,46,66,.4);transition:.12s;font-size:.75rem;user-select:none;}
+.sd-entry:hover{background:rgba(0,212,255,.07);}
+.sd-entry.selected{background:rgba(0,212,255,.13);}
+.sd-icon{width:16px;text-align:center;flex-shrink:0;font-size:.9rem;}
+.sd-name{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sd-size{font-size:.62rem;color:var(--dim);flex-shrink:0;}
+.sd-dir .sd-name{color:var(--yellow);}
+
+/* VIEWER */
+.sd-viewer{display:flex;flex-direction:column;border-top:1px solid var(--border);flex-shrink:0;height:45%;transition:height .3s;min-height:30px;}
+.sd-viewer.collapsed{height:30px;overflow:hidden;}
+.viewer-header{display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--surf2);cursor:pointer;border-bottom:1px solid var(--border);flex-shrink:0;height:30px;}
+.viewer-header .vname{font-size:.7rem;color:var(--accent2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.viewer-header .vtoggle{color:var(--dim);font-size:.7rem;}
+.viewer-body{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+#imgPreview{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#030608;overflow-y:auto;padding:8px;gap:6px;}
+#imgPreview img{max-width:100%;max-height:160px;object-fit:contain;}
+.img-info{color:var(--dim);font-size:.65rem;text-align:center;}
+#jsonEditor{flex:1;min-height:0;display:flex;flex-direction:column;}
+#jsonEditor textarea{flex:1;background:#030608;border:none;color:#a8d8a8;font-family:'Share Tech Mono',monospace;font-size:.72rem;padding:10px;resize:none;outline:none;line-height:1.6;width:100%;min-height:0;}
+.editor-bar{display:flex;gap:6px;padding:6px 10px;background:var(--surf2);border-top:1px solid var(--border);flex-shrink:0;align-items:center;}
+#jsonStatus{font-size:.66rem;color:var(--dim);flex:1;}
+#binInfo{display:flex;flex-direction:column;flex:1;overflow-y:auto;padding:10px;font-size:.7rem;color:var(--dim);line-height:1.7;white-space:pre-wrap;}
+#viewerPlaceholder{padding:20px;color:var(--dim);font-size:.72rem;text-align:center;flex:1;}
+
+/* CAMERA TAB */
+.cam-wrap{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
+.cam-preview{flex:1;background:#020508;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;position:relative;min-height:0;}
+.cam-preview img{max-width:100%;max-height:100%;object-fit:contain;display:none;}
+.cam-preview img.loaded{display:block;}
+.cam-placeholder{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--dim);}
+.cam-placeholder .cam-icon{font-size:3rem;opacity:.25;}
+.cam-placeholder p{font-size:.7rem;text-align:center;line-height:1.7;max-width:240px;}
+.cam-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;}
+.cam-overlay.active{display:flex;}
+.cam-overlay .cam-spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.cam-overlay p{font-size:.7rem;color:var(--accent);}
+.cam-transfer-bar{height:3px;width:100%;background:var(--border);position:absolute;bottom:0;left:0;display:none;}
+.cam-transfer-bar .fill{height:100%;background:var(--accent);width:0%;transition:width .15s;box-shadow:var(--glow);}
+.cam-controls{padding:10px 12px;background:var(--surf);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0;}
+.cam-row{display:flex;align-items:center;gap:8px;}
+.cam-lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;white-space:nowrap;width:60px;flex-shrink:0;}
+.cam-info{font-size:.65rem;color:var(--dim);text-align:center;min-height:14px;}
+.cam-img-info{font-size:.65rem;color:var(--dim);background:#030608;padding:4px 8px;text-align:center;flex-shrink:0;border-top:1px solid var(--border);display:none;}
+.cam-img-info.visible{display:block;}
+.sd-actions{display:flex;gap:6px;padding:7px 10px;border-top:1px solid var(--border);background:var(--surf);flex-shrink:0;flex-wrap:wrap;}
+#pcFileInput{display:none;}
+
+/* OLED canvas */
+.oled-wrap{background:#030608;border:1px solid var(--border);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px;}
+canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:crisp-edges; transform:scale(-1,-1);}
+
+/* MIC TAB */
+.mic-wrap{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
+.mic-viz{flex:1;background:#020508;position:relative;min-height:80px;overflow:hidden;display:flex;flex-direction:column;}
+.mic-canvas-wrap{flex:1;position:relative;min-height:0;}
+#micWaveCanvas{display:block;width:100%;height:100%;}
+.mic-vu-bar{height:8px;background:var(--border);position:relative;flex-shrink:0;}
+.mic-vu-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--yellow) 70%,var(--red) 92%);transition:width .05s;max-width:100%;}
+.mic-vu-peak{position:absolute;top:0;width:2px;height:100%;background:#fff;opacity:.7;transition:left .1s;}
+.mic-status-strip{display:flex;align-items:center;gap:10px;padding:5px 12px;background:var(--surf);border-top:1px solid var(--border);flex-shrink:0;}
+.mic-rec-dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:.2s;}
+.mic-rec-dot.rec{background:var(--red);box-shadow:0 0 8px var(--red);animation:recPulse 1s ease-in-out infinite;}
+.mic-rec-dot.done{background:var(--green);box-shadow:0 0 6px var(--green);animation:none;}
+@keyframes recPulse{0%,100%{opacity:1}50%{opacity:.35}}
+.mic-status-txt{font-size:.68rem;color:var(--dim);flex:1;}
+.mic-timer{font-family:'Exo 2',sans-serif;font-weight:600;font-size:.85rem;color:var(--accent);min-width:40px;text-align:right;}
+.mic-controls{padding:10px 12px;background:var(--surf);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0;}
+.mic-row{display:flex;align-items:center;gap:8px;}
+.mic-lbl{font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;white-space:nowrap;width:60px;flex-shrink:0;}
+.mic-playback{padding:8px 12px;background:#020508;border-top:1px solid var(--border);display:none;flex-direction:column;gap:6px;flex-shrink:0;}
+.mic-playback.visible{display:flex;}
+.mic-play-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;cursor:pointer;}
+.mic-play-fill{height:100%;width:0%;background:var(--accent);transition:width .1s;}
+.mic-play-row{display:flex;align-items:center;gap:8px;}
+.mic-play-time{font-size:.65rem;color:var(--dim);min-width:60px;}
+.mic-info{font-size:.65rem;color:var(--dim);text-align:center;min-height:14px;}
+
+/* STATUS BAR */
+.statusbar{display:flex;gap:14px;padding:4px 18px;border-top:1px solid var(--border);font-size:.62rem;color:var(--dim);background:rgba(0,0,0,.35);flex-shrink:0;}
+.statusbar .sep{color:var(--border);}
+
+/* IMU dot */
+#imuDot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:5px;transition:.2s;}
+#imuDot.pulse{background:var(--green);box-shadow:0 0 7px var(--green);}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surf);border:1px solid var(--border);border-radius:6px;padding:20px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto;}
+.modal h2{font-family:'Exo 2',sans-serif;font-size:.95rem;color:var(--accent);margin-bottom:14px;}
+.modal textarea{width:100%;background:#08111a;border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.74rem;padding:8px;border-radius:3px;outline:none;resize:vertical;}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:var(--dim);}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">XIAO<span>ML</span> · WebSerial Lab</div>
+    <div class="sub">ESP32S3 Sense · LSM6DS3 IMU · SSD1306 0.42" OLED · SD File Manager · ESP Web Tools Flash</div>
+  </div>
+  <div class="hdr-right">
+    <div class="status-pill"><div id="dot"></div><span id="stlbl">DISCONNECTED</span></div>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ══ SIDEBAR LEFT ══ -->
+  <div class="sidebar">
+
+    <!-- Connection -->
+    <div class="card">
+      <div class="card-title">Connection <span class="badge">WebSerial</span></div>
+      <label class="lbl">Baud Rate</label>
+      <div style="margin-bottom:10px">
+        <select id="baudSel">
+          <option value="9600">9600</option><option value="57600">57600</option>
+          <option value="115200" selected>115200</option><option value="230400">230400</option><option value="921600">921600</option>
+        </select>
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" id="btnCon">▶ Connect</button>
+        <button class="btn red" id="btnDis" disabled>■ Disc</button>
+        <button class="btn ghost sm" id="btnRst" disabled>⟳ Reset</button>
+      </div>
+      <div id="portInfo" style="font-size:.62rem;color:var(--dim);margin-top:8px;min-height:12px;line-height:1.5;"></div>
+    </div>
+
+    <!-- IMU mini -->
+    <div class="card">
+      <div class="card-title"><span id="imuDot"></span>IMU <span class="badge">LSM6DS3</span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px;text-align:center;">
+        <div><div style="font-size:.56rem;color:var(--dim)">AX</div><div id="ax" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent)">—</div></div>
+        <div><div style="font-size:.56rem;color:var(--dim)">AY</div><div id="ay" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent)">—</div></div>
+        <div><div style="font-size:.56rem;color:var(--dim)">AZ</div><div id="az" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent)">—</div></div>
+        <div><div style="font-size:.56rem;color:var(--dim)">GX</div><div id="gx" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent2)">—</div></div>
+        <div><div style="font-size:.56rem;color:var(--dim)">GY</div><div id="gy" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent2)">—</div></div>
+        <div><div style="font-size:.56rem;color:var(--dim)">GZ</div><div id="gz" style="font-family:'Exo 2';font-size:.9rem;color:var(--accent2)">—</div></div>
+      </div>
+      <div id="imuTemp" style="font-size:.6rem;color:var(--dim);margin-bottom:8px">Temp: —°C</div>
+      <div class="btn-group">
+        <button class="btn green sm" onclick="sendCmd('IMU_STREAM')">▶ Stream</button>
+        <button class="btn red sm" onclick="sendCmd('IMU_STOP')">■ Stop</button>
+        <button class="btn sm" onclick="sendCmd('IMU')">Once</button>
+      </div>
+    </div>
+
+    <!-- OLED -->
+    <div class="card">
+      <div class="card-title">OLED <span class="badge">72×40 · 0.42"</span></div>
+        <div class="oled-wrap" id="oledWrap" style="width:288px;height:160px;">
+  	      <canvas id="oledCanvas" width="72" height="40" style="width:288px;height:160px; transform: scale(-1,-1);"></canvas>
+        </div>
+      <div class="row" style="margin-bottom:6px;align-items:center;gap:6px;">
+        <label class="lbl" style="margin:0;white-space:nowrap">Zoom</label>
+        <select id="oledZoom" onchange="setOledZoom(this.value)" style="font-size:.65rem;padding:4px 6px;flex:1;">
+          <option value="1">1× — 144×80</option>
+          <option value="2" selected>2× — 288×160</option>
+          <option value="3">3× — 432×240</option>
+          <option value="4">4× — 576×320</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+        <input type="text" id="oledMsg" placeholder="Msg (use \n for newline)" style="flex:1;margin-bottom:0;">
+        <button class="btn orange sm" onclick="sendOled()" style="white-space:nowrap">SEND</button>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label class="lbl" style="margin-bottom:4px">Display Mode</label>
+        <select id="oledDisplayMode" onchange="oledSetDisplayMode(this.value)" style="font-size:.68rem;">
+          <option value="msg">Message (up to 3 lines)</option>
+          <option value="msg_sm">Message Small Font</option>
+          <option value="msg_lg">Message Large Font (1 line)</option>
+          <option value="imu">IMU Live (3-axis accel)</option>
+          <option value="status">Status (IMU / SD / Uptime)</option>
+          <option value="off">Off / Clear</option>
+        </select>
+      </div>
+      <div class="btn-group">
+        <button class="btn ghost sm" onclick="sendCmd('OLED_CLEAR');oledMode='message';OLED.render(()=>{})">CLR</button>
+        <button class="btn ghost sm" onclick="oledSetDisplayMode('imu');document.getElementById('oledDisplayMode').value='imu'">IMU</button>
+        <button class="btn ghost sm" onclick="sendCmd('OLED_STATUS');oledMode='status';updateOledStatus()">STS</button>
+      </div>
+    </div>
+
+    <!-- Quick cmds -->
+    <div class="card" style="flex:1">
+      <div class="card-title">Quick Commands</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <button class="btn sm" onclick="sendCmd('PING')">PING</button>
+        <button class="btn sm" onclick="sendCmd('STATUS')">STATUS</button>
+        <button class="btn sm" onclick="sendCmd('HELP')">HELP / CMDS</button>
+        <button class="btn sm" onclick="sendCmd('HEAP')">HEAP INFO</button>
+        <button class="btn sm" onclick="sendCmd('SD_INFO')">SD INFO</button>
+        <button class="btn sm" onclick="sdRefresh()">SD REFRESH</button>
+        <button class="btn red sm" onclick="sendCmd('RESET')">RESET DEVICE</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ CENTER ══ -->
+  <div class="center">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('terminal',this)">Terminal</div>
+      <div class="tab" onclick="switchTab('flash',this)">⚡ Flash Firmware</div>
+      <div class="tab" onclick="switchTab('imu',this)">IMU Detail</div>
+      <div class="tab" onclick="switchTab('camera',this)">📷 Camera</div>
+      <div class="tab" onclick="switchTab('mic',this)">🎙 Microphone</div>
+    </div>
+
+    <!-- TERMINAL -->
+    <div class="tab-pane active" id="tab-terminal">
+      <div id="terminal"></div>
+      <div class="quick-bar">
+        <span style="font-size:.6rem;color:var(--dim);align-self:center">QUICK:</span>
+        <span class="qb" onclick="sendCmd('PING')">PING</span>
+        <span class="qb" onclick="sendCmd('STATUS')">STATUS</span>
+        <span class="qb" onclick="sendCmd('IMU')">IMU</span>
+        <span class="qb" onclick="sendCmd('IMU_STREAM')">IMU▶</span>
+        <span class="qb" onclick="sendCmd('IMU_STOP')">IMU■</span>
+        <span class="qb" onclick="sdRefresh()">SD LIST</span>
+        <span class="qb" onclick="sendCmd('SD_INFO')">SD INFO</span>
+        <span class="qb" onclick="sendCmd('HELP')">HELP</span>
+        <span class="qb" onclick="sendCmd('HEAP')">HEAP</span>
+        <span class="qb" onclick="clearTerminal()">CLR</span>
+        <span class="qb" onclick="saveLog()">SAVE LOG</span>
+        <span class="qb" onclick="toggleAutoScroll()" id="qbAuto">AUTO↓ ON</span>
+      </div>
+      <div class="term-input-bar">
+        <input type="text" id="txIn" placeholder="Command or text... (Enter to send)" onkeydown="if(event.key==='Enter')sendSerial()">
+        <button class="btn" id="btnSend" disabled onclick="sendSerial()">SEND</button>
+      </div>
+    </div>
+
+    <!-- FLASH -->
+    <div class="tab-pane" id="tab-flash">
+      <div class="flash-wrap">
+        <div style="font-size:.7rem;color:var(--dim);margin-bottom:14px;line-height:1.6;border-left:2px solid var(--accent2);padding-left:10px;">
+          Uses <b style="color:var(--text)">esptool-js v0.5.7</b> to flash via WebSerial directly from the browser.
+          If serial monitor is connected it will be released automatically before flashing and reconnected after.
+          Requires HTTPS or localhost.
+        </div>
+
+        <div class="flash-option sel" id="optA" onclick="selFlash('A')">
+          <h3>▸ Option A — Sketch Only (.bin)</h3>
+          <p>Flash only the application partition at 0x10000. Fast. Preserves bootloader and NVS. Use when the bootloader is already on the device.</p>
+          <div id="inputsA">
+            <div class="frow">
+              <div class="flbl">Browse (optional)</div>
+              <input type="file" id="fSketch" accept=".bin">
+              <input type="text" id="aSketch" value="0x10000" style="width:80px">
+            </div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.bin</span> · Browse to override</div>
+          </div>
+        </div>
+
+        <div class="flash-option" id="optB" onclick="selFlash('B')">
+          <h3>▸ Option B — Full / Merged Flash (.bin)</h3>
+          <p>Flash a single merged binary that combines bootloader, partition table, and app. Produced by Arduino IDE 2.x as <code style="color:var(--accent)">*.ino.merged.bin</code>. Use for fresh chips or after partition changes.</p>
+          <div id="inputsB" style="display:none">
+            <div class="frow">
+              <div class="flbl">Browse (optional)</div>
+              <input type="file" id="fMerged" accept=".bin">
+              <input type="text" id="aMerged" value="0x0" style="width:80px">
+            </div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.merged.bin</span> → 0x0 · Browse to override</div>
+          </div>
+        </div>
+
+        <div class="prog-wrap" id="progWrap"><div class="prog-bar" id="progBar"></div></div>
+        <div class="btn-group" style="margin-top:10px">
+         MUST REFREESH WEBPAGE FIRST: <button class="btn orange" onclick="flashFw()">⚡ Flash Device</button> then replug in esp32 after
+        </div>
+        <div id="flashSts" style="font-size:.7rem;color:var(--dim);margin-top:8px;min-height:16px;"></div>
+
+        <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border);">
+          <div class="card-title" style="margin-bottom:8px">Locating .bin Files (Arduino IDE 2.x)</div>
+          <div style="font-size:.68rem;color:var(--dim);line-height:1.8;">
+            Enable: <i style="color:var(--text)">File → Preferences → Show verbose output during: compilation</i><br>
+            The build path is printed in the compilation log.<br><br>
+            <b style="color:var(--text)">Option A</b> — Sketch only (bootloader already on device):<br>
+            <span style="color:var(--accent)">YourSketch.ino.bin</span> → 0x10000<br><br>
+            <b style="color:var(--text)">Option B</b> — Single merged binary (fresh chip):<br>
+            <span style="color:var(--accent)">YourSketch.ino.merged.bin</span> → 0x0<br>
+            <span style="color:var(--dim)">(Arduino IDE 2.x exports this via Sketch → Export Compiled Binary)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IMU DETAIL -->
+    <div class="tab-pane" id="tab-imu">
+      <div class="imu-wrap">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <span id="imuDot2" style="width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block;"></span>
+          <span style="font-size:.7rem;color:var(--dim)">Stream</span>
+          <button class="btn green sm" onclick="sendCmd('IMU_STREAM')">▶ Start</button>
+          <button class="btn red sm" onclick="sendCmd('IMU_STOP')">■ Stop</button>
+          <span id="imuTemp2" style="margin-left:auto;font-size:.7rem;color:var(--dim)">Temp: —°C</span>
+        </div>
+        <div class="imu-grid">
+          <div class="imu-cell"><div class="imu-axis">Accel X</div><div class="imu-val" id="ax2">—</div><div class="imu-unit">m/s²</div></div>
+          <div class="imu-cell"><div class="imu-axis">Accel Y</div><div class="imu-val" id="ay2">—</div><div class="imu-unit">m/s²</div></div>
+          <div class="imu-cell"><div class="imu-axis">Accel Z</div><div class="imu-val" id="az2">—</div><div class="imu-unit">m/s²</div></div>
+          <div class="imu-cell"><div class="imu-axis">Gyro X</div><div class="imu-val" id="gx2" style="color:var(--accent2)">—</div><div class="imu-unit">°/s</div></div>
+          <div class="imu-cell"><div class="imu-axis">Gyro Y</div><div class="imu-val" id="gy2" style="color:var(--accent2)">—</div><div class="imu-unit">°/s</div></div>
+          <div class="imu-cell"><div class="imu-axis">Gyro Z</div><div class="imu-val" id="gz2" style="color:var(--accent2)">—</div><div class="imu-unit">°/s</div></div>
+        </div>
+        <div style="font-size:.68rem;color:var(--dim);margin-top:6px;line-height:1.6">
+          Values from LSM6DS3 via Seeed Arduino LSM6DS3 library readFloat* methods.<br>
+          Accel in m/s² (gravity = ~9.8). Gyro in degrees/second.
+        </div>
+      </div>
+    </div>
+
+    <!-- CAMERA -->
+    <div class="tab-pane" id="tab-camera">
+      <div class="cam-wrap">
+
+        <!-- Preview area -->
+        <div class="cam-preview" id="camPreview">
+          <div class="cam-placeholder" id="camPlaceholder">
+            <div class="cam-icon">📷</div>
+            <p>Press <b style="color:var(--accent)">Capture</b> to take a photo.<br>
+            Image transfers over serial as base64.<br>
+            <span style="color:var(--dim);font-size:.63rem;">240×240 ~3–8 KB · ~1–2s (tinyML default)<br>
+            VGA ~15–40 KB · ~4–8s · QVGA ~5–12 KB · ~1–3s</span></p>
+          </div>
+          <img id="camImg" alt="capture">
+          <div class="cam-overlay" id="camOverlay">
+            <div class="cam-spinner"></div>
+            <p id="camOverlayMsg">Capturing...</p>
+          </div>
+          <div class="cam-transfer-bar" id="camTransferBar">
+            <div class="fill" id="camTransferFill"></div>
+          </div>
+        </div>
+
+        <!-- Image info strip -->
+        <div class="cam-img-info" id="camImgInfo">— no capture yet —</div>
+
+        <!-- Controls -->
+        <div class="cam-controls">
+          <!-- Resolution row -->
+          <div class="cam-row">
+            <span class="cam-lbl">Resolution</span>
+            <select id="camRes" style="flex:1">
+              <option value="240X240" selected>240×240  (tinyML default, square)</option>
+              <option value="QVGA">QVGA  320×240  (fast)</option>
+              <option value="VGA">VGA   640×480  (good quality)</option>
+              <option value="SVGA">SVGA  800×600</option>
+              <option value="XGA">XGA   1024×768</option>
+              <option value="SXGA">SXGA  1280×1024</option>
+              <option value="UXGA">UXGA  1600×1200 (slow)</option>
+            </select>
+          </div>
+          <!-- Quality row -->
+          <div class="cam-row">
+            <span class="cam-lbl">Quality</span>
+            <input type="range" id="camQuality" min="4" max="63" value="12" style="flex:1;accent-color:var(--accent)">
+            <span id="camQualLbl" style="font-size:.68rem;color:var(--dim);width:28px;text-align:right">12</span>
+            <span style="font-size:.6rem;color:var(--dim);width:60px">low=better</span>
+          </div>
+          <!-- Save path row -->
+          <div class="cam-row">
+            <span class="cam-lbl">SD Path</span>
+            <input type="text" id="camSavePath" placeholder="/images/0Blank/" style="flex:1">
+            <button class="btn ghost sm" onclick="camUseCwd()" title="Use current SD directory" style="padding:4px 7px;font-size:.62rem">⊙ CWD</button>
+          </div>
+          <!-- Action row -->
+          <div class="cam-row" style="gap:8px;justify-content:space-between">
+            <button class="btn primary" id="btnCapture" onclick="camCapture()" disabled style="flex:1">
+              📷 Capture
+            </button>
+            <button class="btn green" id="btnSaveSD" onclick="camSaveToSD()" disabled style="flex:1">
+              💾 Save to SD
+            </button>
+            <button class="btn" id="btnSavePC" onclick="camSaveToPC()" disabled style="flex:1">
+              ↓ Save to PC
+            </button>
+          </div>
+          <div class="cam-info" id="camStatusMsg">Connect device to enable camera</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- MICROPHONE -->
+    <div class="tab-pane" id="tab-mic">
+      <div class="mic-wrap">
+
+        <!-- Waveform + VU visualizer -->
+        <div class="mic-viz">
+          <div class="mic-canvas-wrap">
+            <canvas id="micWaveCanvas"></canvas>
+          </div>
+          <div class="mic-vu-bar">
+            <div class="mic-vu-fill" id="micVuFill"></div>
+            <div class="mic-vu-peak" id="micVuPeak" style="left:0%"></div>
+          </div>
+        </div>
+
+        <!-- Status strip -->
+        <div class="mic-status-strip">
+          <div class="mic-rec-dot" id="micDot"></div>
+          <span class="mic-status-txt" id="micStatusTxt">Connect device — then press Record</span>
+          <span class="mic-timer" id="micTimer">0.0s</span>
+        </div>
+
+        <!-- Playback bar (hidden until recording received) -->
+        <div class="mic-playback" id="micPlayback">
+          <div class="mic-play-row">
+            <button class="btn sm" id="btnPlay" onclick="micPlay()" style="min-width:64px">▶ Play</button>
+            <div class="mic-play-bar" id="micPlayBar" style="flex:1" onclick="micSeek(event)">
+              <div class="mic-play-fill" id="micPlayFill"></div>
+            </div>
+            <span class="mic-play-time" id="micPlayTime">0:00 / 0:00</span>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="mic-controls">
+          <!-- Duration -->
+          <div class="mic-row">
+            <span class="mic-lbl">Duration</span>
+            <input type="range" id="micDuration" min="1" max="30" value="3" style="flex:1;accent-color:var(--red)">
+            <span id="micDurLbl" style="font-size:.68rem;color:var(--dim);width:36px;text-align:right">3s</span>
+          </div>
+          <!-- Gain -->
+          <div class="mic-row">
+            <span class="mic-lbl">Gain</span>
+            <input type="range" id="micGain" min="1" max="8" value="2" style="flex:1;accent-color:var(--accent)">
+            <span id="micGainLbl" style="font-size:.68rem;color:var(--dim);width:36px;text-align:right">×2</span>
+          </div>
+          <!-- Sample rate -->
+          <div class="mic-row">
+            <span class="mic-lbl">Sample rate</span>
+            <select id="micSampleRate" style="flex:1">
+              <option value="8000">8 kHz  (speech, tinyML)</option>
+              <option value="16000" selected>16 kHz  (default, Edge Impulse)</option>
+              <option value="22050">22 kHz</option>
+              <option value="44100">44.1 kHz  (CD, slow transfer)</option>
+            </select>
+          </div>
+          <!-- Save path -->
+          <div class="mic-row">
+            <span class="mic-lbl">SD Path</span>
+            <input type="text" id="micSavePath" placeholder="/audio/" style="flex:1">
+            <button class="btn ghost sm" onclick="micUseCwd()" title="Use current SD directory" style="padding:4px 7px;font-size:.62rem">⊙ CWD</button>
+          </div>
+          <!-- Actions -->
+          <div class="mic-row" style="gap:8px;justify-content:space-between">
+            <button class="btn" style="flex:1;color:var(--red);border-color:var(--red)" id="btnRecord" onclick="micRecord()" disabled>
+              ⏺ Record
+            </button>
+            <button class="btn green" id="btnMicSaveSD" onclick="micSaveToSD()" disabled style="flex:1">
+              💾 Save to SD
+            </button>
+            <button class="btn" id="btnMicSavePC" onclick="micSaveToPC()" disabled style="flex:1">
+              ↓ Save to PC
+            </button>
+          </div>
+          <div class="mic-info" id="micInfo">Connect device to enable microphone</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SD PANEL RIGHT ══ -->
+  <div class="sd-panel">
+    <div class="sd-top">
+      <div class="card-title" style="margin-bottom:0">SD Card <span class="badge">File Browser</span></div>
+      <button class="btn ghost sm" style="margin-left:auto;padding:3px 8px" onclick="sdRefresh()" title="Refresh">⟳</button>
+      <button class="btn ghost sm" style="padding:3px 8px" id="btnUp" onclick="sdGoUp()" title="Parent directory" disabled>↑</button>
+    </div>
+
+    <div class="breadcrumb" id="breadcrumb">
+      <span class="bc-item" onclick="sdNavigate('/')">⊟ /</span>
+    </div>
+
+    <div class="sd-list" id="sdList">
+      <div style="padding:20px;color:var(--dim);font-size:.72rem;text-align:center;line-height:1.8;">
+        Connect device<br>then press ⟳ or SD REFRESH<br>to browse the SD card
+      </div>
+    </div>
+
+    <div class="sd-actions">
+      <button class="btn green sm" onclick="sdRefresh()">⟳ Refresh</button>
+      <button class="btn sm" onclick="triggerUpload()">↑ Upload</button>
+      <button class="btn ghost sm" onclick="sdNewFile()">+ New</button>
+      <button class="btn red sm" id="btnDeleteFile" style="display:none" onclick="sdDeleteSelected()">🗑</button>
+    </div>
+    <input type="file" id="pcFileInput" accept="*/*" multiple onchange="uploadFilesToSD(this.files)">
+
+    <!-- Viewer -->
+    <div class="sd-viewer" id="sdViewer">
+      <div class="viewer-header" onclick="toggleViewer()">
+        <span class="vname" id="viewerName">— no file selected —</span>
+        <span class="vtoggle" id="viewerToggle">▾</span>
+      </div>
+      <div class="viewer-body" id="viewerBody">
+        <div id="imgPreview" style="display:none"></div>
+        <div id="jsonEditor" style="display:none;flex:1;flex-direction:column;">
+          <textarea id="jsonText" spellcheck="false"></textarea>
+          <div class="editor-bar">
+            <span id="jsonStatus">—</span>
+            <button class="btn green sm" onclick="saveEditorFile()">💾 Save</button>
+            <button class="btn ghost sm" onclick="validateJson()">✓ Valid</button>
+            <button class="btn ghost sm" onclick="downloadEditorFile()">↓ DL</button>
+          </div>
+        </div>
+        <div id="binInfo" style="display:none;flex:1;"></div>
+        <div id="viewerPlaceholder" style="display:flex;flex:1;">
+          <div style="margin:auto;padding:20px;color:var(--dim);font-size:.72rem;text-align:center;">Click a file to open it</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="statusbar">
+  <span id="rxCount">RX: 0 B</span><span class="sep">|</span>
+  <span id="txCount">TX: 0 B</span><span class="sep">|</span>
+  <span id="uptimeLbl">Uptime: —</span><span class="sep">|</span>
+  <span id="sdCwdLbl">SD: /</span><span class="sep">|</span>
+  <span>WebSerial: <span id="wsSupport" style="color:var(--green)">OK</span></span>
+</div>
+
+<!-- New File Modal -->
+<div class="modal-overlay" id="newFileModal">
+  <div class="modal">
+    <h2>Create New File on SD</h2>
+    <div class="row" style="flex-direction:column;align-items:stretch">
+      <label class="lbl">Filename</label>
+      <input type="text" id="newFileName" placeholder="e.g. config.json" style="margin-bottom:10px">
+      <label class="lbl">Content</label>
+      <textarea id="newFileContent" rows="6" placeholder="File content...">{
+}</textarea>
+    </div>
+    <div class="btn-group" style="margin-top:12px">
+      <button class="btn primary" onclick="confirmNewFile()">Create File</button>
+      <button class="btn ghost" onclick="closeModal('newFileModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════
+//  App State
+// ═══════════════════════════════
+const S = {
+  port:null,reader:null,writer:null,
+  connected:false,readLoopActive:false,
+  rxBytes:0,txBytes:0,autoScroll:true,
+  connectedAt:null,uptimeTimer:null,
+    // Flash settings
+    myFlashMode: 'A', // Tracks if Option A or Option B is active
+    // Option A: Sketch Only
+    myFlashSketchFile: 'esp32_web_tool_test07.ino.bin',
+    myFlashSketchAddr: '0x10000',
+
+    // Option B: Full Merged
+    myFlashMergedFile: 'esp32_web_tool_test07.ino.merged.bin',
+    myFlashMergedAddr: '0x0',
+  cwd:'/',
+  sdEntries:[],
+  selectedFile:null,
+  contentFile:null,
+  viewerCollapsed:false,
+  // collectors
+  collectList:false,
+  collectContent:false,
+  contentLines:[],
+  collectJpeg:false,
+  jpegChunks:[],
+  // camera capture
+  collectCam:false,
+  camChunks:[],
+  camB64:null,           // last captured image as base64 string
+  camCapturing:false,    // guard against double-capture
+  // microphone
+  collectMic:false,
+  micChunks:[],
+  micWavBytes:null,      // last recording as Uint8Array (complete WAV with header)
+  micRecording:false,
+  micTotalChunks:0,      // estimated from duration for progress bar
+};
+
+// ── WebSerial support check ──
+if(!('serial' in navigator)){
+  document.getElementById('wsSupport').textContent='NOT SUPPORTED';
+  document.getElementById('wsSupport').style.color='var(--red)';
+  termLog('err','⚠ WebSerial requires Chrome or Edge 89+ over HTTPS or localhost.');
+}
+
+// ── OLED simulation ──
+// Matches U8G2_SSD1306_72X40_ER with U8G2_R2 rotation (180°).
+// U8g2 uses baseline-y coordinates. u8g2_font_ncenB10_tr is ~10px tall,
+// baseline at y=10 for first line, y=20 for second, y=30 for third.
+// The canvas is drawn at native 72×40 then CSS-scaled 2× to 144×80.
+
+const OLED = {
+  W: 72, H: 40,
+  // Draw the whole display — clears first, then calls the supplied draw function
+  render(drawFn) {
+    const c = document.getElementById('oledCanvas');
+    const ctx = c.getContext('2d');
+    // U8G2_R2 = 180° rotation — we rotate the canvas context
+    ctx.save();
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.W, this.H);
+    // Rotate 180° around centre to match U8G2_R2
+    ctx.translate(this.W, this.H);
+    ctx.rotate(Math.PI);
+    drawFn(ctx);
+    ctx.restore();
+  },
+  // Mimic u8g2_font_ncenB10_tr: Century/serif bold ~10px
+  // Canvas font that most closely matches ncenB10 (New Century Schoolbook Bold 10pt)
+  font: 'bold 9px Georgia, "Times New Roman", serif',
+  smallFont: 'bold 7px Georgia, "Times New Roman", serif',
+
+  // Draw a text line. y is the BASELINE (matching u8g2.setCursor(x,y) / u8g2.print())
+  text(ctx, str, x, y, color='#fff') {
+    ctx.fillStyle = color;
+    ctx.font = this.font;
+    ctx.fillText(String(str), x, y);
+  },
+
+  // Draw a filled box (matching u8g2.drawBox)
+  box(ctx, x, y, w, h, color='#fff') {
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+  },
+
+  // The standard startup screen
+  startup() {
+    this.render(ctx => {
+      this.text(ctx, 'XIAOml', 3, 10);
+      this.text(ctx, 'WebSerial', 3, 22);
+      ctx.fillStyle = '#00d4ff';
+      ctx.font = this.smallFont;
+      ctx.fillText('Ready...', 3, 33);
+    });
+  },
+
+  // Show a generic message — mirrors oledMessage() in the sketch
+  // which calls u8g2.setCursor(3,20) then print(msg)
+  message(msg) {
+    this.render(ctx => {
+      const lines = msg.split('\n');
+      lines.forEach((line, i) => {
+        // u8g2 baseline y: first line at 10, each subsequent +12
+        this.text(ctx, line, 3, 10 + i * 12);
+      });
+    });
+  },
+
+  // Show IMU values — mirrors oledShowIMU() in sketch
+  // X:val at y=10, Y:val at y=20, Z:val at y=30
+  imu(ax, ay, az) {
+    this.render(ctx => {
+      this.text(ctx, 'X:' + Number(ax).toFixed(1), 1, 10);
+      this.text(ctx, 'Y:' + Number(ay).toFixed(1), 1, 22);
+      this.text(ctx, 'Z:' + Number(az).toFixed(1), 1, 34);
+    });
+  },
+
+  // Show status — mirrors oledShowStatus() in sketch
+  status(imuOk, sdOk, uptime) {
+    this.render(ctx => {
+      this.text(ctx, 'IMU:' + (imuOk ? 'OK' : 'ERR'), 1, 10);
+      this.text(ctx, 'SD: ' + (sdOk  ? 'OK' : 'ERR'), 1, 22);
+      this.text(ctx, 'UP:' + uptime + 's',             1, 34);
+    });
+  },
+
+  // Mirror the sketch counter display:
+  //   drawBox(0,0,20,15) black, then white counter text, then image pixels
+  counter(count) {
+    this.render(ctx => {
+      // Black box top-left (same as sketch: drawBox 0,0,20,15)
+      this.box(ctx, 0, 0, 20, 14, '#000');
+      // White counter text — setCursor(3,10) in sketch
+      this.text(ctx, String(count), 3, 10);
+    });
+  },
+
+  // Small font message (fits more text, ~4 lines)
+  // Uses 7px font — same as smallFont defined above
+  messageSmall(msg) {
+    this.render(ctx => {
+      const lines = msg.split('\n');
+      lines.forEach((line, i) => {
+        ctx.fillStyle = '#fff';
+        ctx.font = this.smallFont;
+        ctx.fillText(String(line), 2, 8 + i * 9);
+      });
+    });
+  },
+
+  // Large font message (1 big line, up to ~8 chars)
+  // Uses 16px bold
+  messageLarge(msg) {
+    this.render(ctx => {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px Georgia, serif';
+      // Centre vertically
+      ctx.fillText(String(msg).split('\n')[0], 2, 26);
+    });
+  }
+};
+
+// Initial display on page load
+OLED.startup();
+
+// ── OLED preview zoom ──
+function setOledZoom(z){
+  const scale = parseInt(z) || 2;
+  const w = 72 * scale, h = 40 * scale;
+  const wrap = document.getElementById('oledWrap');
+  const canvas = document.getElementById('oledCanvas');
+  wrap.style.width = w + 'px';
+  wrap.style.height = h + 'px';
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+// Quality slider live label
+document.getElementById('camQuality').addEventListener('input', function(){
+  document.getElementById('camQualLbl').textContent = this.value;
+});
+document.getElementById('micDuration').addEventListener('input', function(){
+  document.getElementById('micDurLbl').textContent = this.value+'s';
+});
+document.getElementById('micGain').addEventListener('input', function(){
+  document.getElementById('micGainLbl').textContent = '×'+this.value;
+});
+
+// ═══════════════════════════════
+//  Terminal
+// ═══════════════════════════════
+function termLog(cls,msg){
+  const t=document.getElementById('terminal');
+  const d=document.createElement('div');d.className=cls;
+  const n=new Date();
+  const ts=n.toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  d.textContent=`[${ts}.${String(n.getMilliseconds()).padStart(3,'0')}] ${msg}`;
+  t.appendChild(d);
+  if(S.autoScroll)t.scrollTop=t.scrollHeight;
+}
+function clearTerminal(){document.getElementById('terminal').innerHTML='';}
+function toggleAutoScroll(){S.autoScroll=!S.autoScroll;document.getElementById('qbAuto').textContent=`AUTO↓ ${S.autoScroll?'ON':'OFF'}`;}
+function saveLog(){
+  const lines=[...document.querySelectorAll('#terminal div')].map(d=>d.textContent).join('\n');
+  dlBlob(new Blob([lines],{type:'text/plain'}),`serial_log_${Date.now()}.txt`);
+}
+function dlBlob(blob,fname){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();}
+
+// ═══════════════════════════════
+//  Tabs
+// ═══════════════════════════════
+function switchTab(name,el){
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  el.classList.add('active');
+}
+
+// ═══════════════════════════════
+//  Connect / Disconnect
+// ═══════════════════════════════
+async function connect(){
+  try{
+    S.port=await navigator.serial.requestPort();
+    const baud=parseInt(document.getElementById('baudSel').value);
+    await S.port.open({baudRate:baud});
+    const info=S.port.getInfo();
+    document.getElementById('portInfo').textContent=
+      `VID:0x${(info.usbVendorId||0).toString(16).padStart(4,'0').toUpperCase()}  PID:0x${(info.usbProductId||0).toString(16).padStart(4,'0').toUpperCase()}  @ ${baud} baud`;
+    S.writer=S.port.writable.getWriter();
+    const tds=new TextDecoderStream();
+    S.port.readable.pipeTo(tds.writable);
+    S.reader=tds.readable.getReader();
+    setConnected(true);
+    termLog('sys',`▶ Connected @ ${baud} baud`);
+    readLoop();
+    setTimeout(()=>sendCmd('STATUS'),800);
+  }catch(e){termLog('err',`Connect failed: ${e.message}`);}
+}
+async function disconnect(){
+  S.readLoopActive=false;
+  try{if(S.reader){await S.reader.cancel();S.reader.releaseLock();}}catch{}
+  try{if(S.writer){S.writer.releaseLock();}}catch{}
+  try{if(S.port)await S.port.close();}catch{}
+  S.port=null;S.reader=null;S.writer=null;
+  setConnected(false);termLog('sys','■ Disconnected');
+}
+function setConnected(v){
+  S.connected=v;
+  document.getElementById('dot').className=v?'on':'';
+  document.getElementById('stlbl').textContent=v?'CONNECTED':'DISCONNECTED';
+  document.getElementById('btnCon').disabled=v;
+  ['btnDis','btnRst','btnSend'].forEach(id=>document.getElementById(id).disabled=!v);
+  document.getElementById('btnCapture').disabled=!v;
+  if(v) document.getElementById('camStatusMsg').textContent='Ready — press Capture';
+  else  document.getElementById('camStatusMsg').textContent='Connect device to enable camera';
+  document.getElementById('btnRecord').disabled=!v;
+  if(v) document.getElementById('micInfo').textContent='Ready — set duration and press Record';
+  else  document.getElementById('micInfo').textContent='Connect device to enable microphone';
+  if(v){
+    S.connectedAt=Date.now();
+    S.uptimeTimer=setInterval(updateUptime,1000);
+  }else{
+    clearInterval(S.uptimeTimer);
+    document.getElementById('uptimeLbl').textContent='Uptime: —';
+  }
+}
+function updateUptime(){
+  const s=Math.floor((Date.now()-S.connectedAt)/1000);
+  const h=String(Math.floor(s/3600)).padStart(2,'0');
+  const m=String(Math.floor(s%3600/60)).padStart(2,'0');
+  const sc=String(s%60).padStart(2,'0');
+  document.getElementById('uptimeLbl').textContent=`Uptime: ${h}:${m}:${sc}`;
+}
+document.getElementById('btnCon').addEventListener('click',connect);
+document.getElementById('btnDis').addEventListener('click',disconnect);
+document.getElementById('btnRst').addEventListener('click',()=>sendCmd('RESET'));
+
+// ═══════════════════════════════
+//  Read Loop
+// ═══════════════════════════════
+let lineBuf='';
+async function readLoop(){
+  S.readLoopActive=true;
+  try{
+    while(S.readLoopActive){
+      const{value,done}=await S.reader.read();
+      if(done)break;
+      S.rxBytes+=value.length;
+      document.getElementById('rxCount').textContent=`RX: ${fmtB(S.rxBytes)}`;
+      lineBuf+=value;
+      const lines=lineBuf.split('\n');
+      lineBuf=lines.pop();
+      for(const l of lines){const t=l.trim();if(t)processLine(t);}
+    }
+  }catch(e){if(S.readLoopActive)termLog('err',`Read error: ${e.message}`);}
+}
+function fmtB(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';}
+
+function processLine(line){
+  // IMU stream
+  if(line.startsWith('IMU:')){
+    const p=line.slice(4).split(',');
+    if(p.length>=6){
+      ['ax','ay','az'].forEach((id,i)=>{const v=parseFloat(p[i]).toFixed(2);setEl(id,v);setEl(id+'2',v);});
+      ['gx','gy','gz'].forEach((id,i)=>{const v=parseFloat(p[3+i]).toFixed(2);setEl(id,v);setEl(id+'2',v);});
+      if(p[6]){const t=parseFloat(p[6]).toFixed(1)+'°C';document.getElementById('imuTemp').textContent='Temp: '+t;document.getElementById('imuTemp2').textContent='Temp: '+t;}
+      const d=document.getElementById('imuDot');const d2=document.getElementById('imuDot2');
+      d.className='pulse';if(d2)d2.style.background='var(--green)';
+      setTimeout(()=>{d.className='';if(d2)d2.style.background='var(--dim)';},220);
+      // Auto-update OLED simulation if in IMU mode (mirrors oledShowIMU in sketch)
+      if(oledMode==='imu') OLED.imu(p[0],p[1],p[2]);
+    }
+    return;
+  }
+  // SD list
+  if(line==='SD_LIST_START'){S.collectList=true;S.sdEntries=[];return;}
+  if(line.startsWith('SD_FILE:')&&S.collectList){
+    const p=line.slice(8).split(',');
+    if(p[0]?.trim())S.sdEntries.push({name:p[0].trim(),size:p[1]?.trim()||'0',isDir:p[2]?.trim()==='D'});
+    return;
+  }
+  if(line.startsWith('SD_LIST_END')&&S.collectList){S.collectList=false;renderSdList();return;}
+  // SD content
+  if(line==='SD_CONTENT_START'){S.collectContent=true;S.contentLines=[];return;}
+  if(line.startsWith('SD_LINE:')&&S.collectContent){S.contentLines.push(line.slice(8));return;}
+  if(line==='SD_CONTENT_END'&&S.collectContent){S.collectContent=false;displayFileContent(S.contentFile,S.contentLines.join('\n'));return;}
+  // SD JPEG (file viewer)
+  if(line==='SD_JPEG_START'){S.collectJpeg=true;S.jpegChunks=[];return;}
+  if(line.startsWith('SD_JPEG:')&&S.collectJpeg){S.jpegChunks.push(line.slice(8));return;}
+  if(line==='SD_JPEG_END'&&S.collectJpeg){S.collectJpeg=false;showJpeg(S.jpegChunks.join(''),S.contentFile);return;}
+  // CAM JPEG (live capture)
+  if(line==='CAM_JPEG_START'){
+    S.collectCam=true;S.camChunks=[];
+    const bar=document.getElementById('camTransferBar');
+    bar.style.display='block';
+    document.getElementById('camTransferFill').style.width='0%';
+    document.getElementById('camOverlayMsg').textContent='Receiving image...';
+    return;
+  }
+  if(line.startsWith('CAM_JPEG:')&&S.collectCam){
+    S.camChunks.push(line.slice(9));
+    // Estimate progress from chunk count — a VGA JPEG at quality 12 is ~300-600 chunks of 60 chars
+    // We don't know total ahead of time, so we animate toward 90% asymptotically
+    const fill=document.getElementById('camTransferFill');
+    const pct=Math.min(90,S.camChunks.length/4);
+    fill.style.width=pct+'%';
+    return;
+  }
+  if(line==='CAM_JPEG_END'&&S.collectCam){
+    S.collectCam=false;
+    S.camCapturing=false;
+    S.camB64=S.camChunks.join('');
+    document.getElementById('camTransferFill').style.width='100%';
+    setTimeout(()=>{document.getElementById('camTransferBar').style.display='none';},600);
+    camShowCapture(S.camB64);
+    return;
+  }
+  // MIC WAV transfer
+  if(line==='MIC_WAV_START'){
+    S.collectMic=true; S.micChunks=[];
+    micSetState('receiving');
+    return;
+  }
+  if(line.startsWith('MIC_WAV:')&&S.collectMic){
+    S.micChunks.push(line.slice(8));
+    // progress: estimate total chunks from duration × samplerate × 2 bytes × 4/3 base64 / 60 chars per chunk
+    if(S.micTotalChunks>0){
+      const pct=Math.min(95,S.micChunks.length/S.micTotalChunks*100);
+      micSetProgress(pct);
+    }
+    return;
+  }
+  if(line==='MIC_WAV_END'&&S.collectMic){
+    S.collectMic=false;
+    micSetProgress(100);
+    const b64=S.micChunks.join('');
+    // decode base64 → Uint8Array (the complete WAV file including 44-byte header)
+    const bin=atob(b64);
+    const arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    S.micWavBytes=arr;
+    micOnReceived(arr);
+    return;
+  }
+  // (SD WAV from SD card is handled via sdWavForMic flag in showJpeg, using SD_JPEG protocol)
+  // MIC_LEVEL — real-time VU meter during recording (optional, low overhead)
+  if(line.startsWith('MIC_LEVEL:')){
+    const lvl=parseInt(line.slice(10))||0;
+    micUpdateVU(lvl);
+    return;
+  }
+  // OLED echo — sketch sends OLED_ECHO: with the message text after updating display
+  if(line.startsWith('OLED_ECHO:')){
+    oledMode='message';
+    drawOledText(line.slice(10));
+    return;
+  }
+  // Standard OK — watch for OLED mode responses from sketch
+  if(line.startsWith('OK:')){
+    const ok=line.slice(3).toLowerCase();
+    if(ok.includes('oled showing imu'))   { oledMode='imu'; }
+    if(ok.includes('oled showing status')){ oledMode='status'; updateOledStatus(); }
+    if(ok.includes('oled cleared'))       { oledMode='message'; OLED.render(ctx=>{}); }
+    parseStatusLine(ok);
+    // If in status mode, refresh display whenever STATUS data arrives
+    if(oledMode==='status') updateOledStatus();
+    termLog('ok',`✓ ${line.slice(3)}`);
+    return;
+  }
+  if(line.startsWith('ERR:')){termLog('err',`✗ ${line.slice(4)}`);return;}
+  if(line.startsWith('WARN:')){termLog('warn',`⚠ ${line.slice(5)}`);return;}
+  termLog('rx',line);
+}
+function setEl(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+
+// ═══════════════════════════════
+//  Send
+// ═══════════════════════════════
+async function sendSerial(){
+  const el=document.getElementById('txIn');const msg=el.value.trim();
+  if(!msg)return;
+  await writeSerial(msg+'\n');termLog('tx',`→ ${msg}`);el.value='';
+}
+async function sendCmd(cmd){
+  if(!S.writer){termLog('err','Not connected');return;}
+  await writeSerial(cmd+'\n');termLog('tx',`→ ${cmd}`);
+}
+async function writeSerial(data){
+  if(!S.writer)return;
+  const b=new TextEncoder().encode(data);
+  await S.writer.write(b);
+  S.txBytes+=b.length;
+  document.getElementById('txCount').textContent=`TX: ${fmtB(S.txBytes)}`;
+}
+
+// ═══════════════════════════════
+//  Flash
+// ═══════════════════════════════
+function selFlash(m){
+    // Update our state variable
+  S.flashMode=m;
+  document.getElementById('optA').className='flash-option'+(m==='A'?' sel':'');
+  document.getElementById('optB').className='flash-option'+(m==='B'?' sel':'');
+  document.getElementById('inputsA').style.display=m==='A'?'block':'none';
+  document.getElementById('inputsB').style.display=m==='B'?'block':'none';
+  termLog('sys', `Flash mode switched to Option ${m}`);
+}
+async function flashFw(){
+  const sts=document.getElementById('flashSts');
+  const bar=document.getElementById('progBar');
+  const wrap=document.getElementById('progWrap');
+  sts.style.color='var(--dim)';sts.textContent='';
+
+  // ── Resolve firmware files ──
+  // User can optionally browse to override the default; otherwise fetch the default file.
+  // esptool-js v0.5.7: fileArray[].data must be a Latin-1 binary STRING, not base64, not ArrayBuffer
+  let fileObjects=[];
+  wrap.style.display='block';bar.style.width='0%';bar.style.background='var(--accent)';
+  sts.textContent='⏳ Loading firmware file...';
+
+  async function resolveFile(fileInput, defaultName, address){
+    const userFile = fileInput.files[0];
+    if(userFile){
+      return {file: userFile, address};
+    }
+    // Fetch the default file (must be in the same directory as the HTML file)
+    sts.textContent=`⏳ Loading default: ${defaultName}...`;
+    const resp = await fetch(defaultName);
+    if(!resp.ok) throw new Error(`Cannot load default file "${defaultName}" (HTTP ${resp.status}). Place the .bin file alongside this HTML file, or use Browse to select it.`);
+    const blob = await resp.blob();
+    return {file: new File([blob], defaultName, {type:'application/octet-stream'}), address};
+  }
+
+  try{
+    if(S.flashMode==='A'||!S.flashMode){
+      fileObjects=[await resolveFile(
+        document.getElementById('fSketch'),
+        S.myFlashSketchFile,
+        parseInt(document.getElementById('aSketch').value)
+      )];
+    }else{
+      fileObjects=[await resolveFile(
+        document.getElementById('fMerged'),
+        S.myFlashMergedFile,
+        parseInt(document.getElementById('aMerged').value)
+      )];
+    }
+  }catch(resolveErr){
+    sts.style.color='var(--red)';sts.textContent=`✗ ${resolveErr.message}`;
+    termLog('err',`Firmware load: ${resolveErr.message}`);
+    wrap.style.display='none';
+    return;
+  }
+  sts.textContent='⏳ Loading esptool-js v0.5.7...';
+
+  try{
+    // esptool-js v0.5.7 — latest as of 2025
+    const{ESPLoader,Transport}=await import('https://unpkg.com/esptool-js@0.5.7/bundle.js');
+
+    // ── Step 1: acquire port ──
+    // If serial monitor is open, close it first — esptool-js needs the port closed
+    // before it can open it at 921600 baud. We store the port ref and reopen after.
+    let flashPort=S.port;
+
+    if(S.connected){
+      sts.textContent='⏳ Releasing serial monitor...';
+      S.readLoopActive=false;
+      try{if(S.reader){await S.reader.cancel();S.reader.releaseLock();S.reader=null;}}catch{}
+      try{if(S.writer){S.writer.releaseLock();S.writer=null;}}catch{}
+      try{await S.port.close();}catch{}
+      flashPort=S.port;
+      setConnected(false);
+      termLog('sys','Serial monitor released — starting flash');
+      await new Promise(r=>setTimeout(r,400));
+    }
+
+    if(!flashPort){
+      sts.textContent='⏳ Select the ESP32 serial port...';
+      termLog('sys','No port — requesting port for flashing');
+      try{flashPort=await navigator.serial.requestPort();S.port=flashPort;}
+      catch(e){sts.textContent='⚠ Port selection cancelled';termLog('err','Cancelled');return;}
+    }
+
+    // ── Step 2: read binary files as Latin-1 strings BEFORE connecting ──
+    // This is the correct data format for esptool-js v0.4+:
+    //   data = binary string (each char is one byte, charCode = byte value)
+    //   NOT base64, NOT ArrayBuffer, NOT Node.js Buffer
+    sts.textContent='⏳ Reading firmware files...';bar.style.width='5%';
+    const fileArray=await Promise.all(fileObjects.map(async fo=>({
+      data: await fileToBinaryString(fo.file),
+      address: fo.address
+    })));
+    bar.style.width='15%';
+
+    // ── Step 3: connect esptool-js to the closed port ──
+    const transport=new Transport(flashPort,true);
+    const loader=new ESPLoader({
+      transport,
+      baudrate:921600,
+      terminal:{clean:()=>{},writeLine:l=>termLog('sys',l),write:c=>termLog('sys',c)}
+    });
+
+    sts.textContent='⏳ Connecting to chip (hold BOOT button if needed)...';
+    bar.style.width='20%';
+    const chip=await loader.main();
+    termLog('ok',`Chip: ${chip}`);bar.style.width='30%';
+
+    // ── Step 4: flash ──
+    await loader.writeFlash({
+      fileArray,
+      flashSize:'keep',
+      flashFreq:'80m',
+      flashMode:'dio',
+      eraseAll:false,
+      compress:true,
+      reportProgress(i,written,total){
+        bar.style.width=(30+Math.floor(written/total*65))+'%';
+        sts.textContent=`Flashing ${i+1}/${fileArray.length}: ${Math.floor(written/total*100)}%`;
+      }
+    });
+
+    bar.style.width='100%';
+    sts.style.color='var(--green)';
+    sts.textContent='✓ Flash complete — device restarting';
+    termLog('ok','⚡ Flash successful');
+    // loader.hardReset() was removed in esptool-js v0.5+.
+    // loader.after('hard_reset') is the replacement; transport.disconnect()
+    // also releases RTS/DTR which triggers the XIAO ESP32S3 auto-reset circuit.
+    try{
+      if(typeof loader.after==='function') await loader.after('hard_reset');
+    }catch(e){ termLog('sys',`Reset note: ${e.message}`); }
+    await transport.disconnect();
+
+    // ── Step 5: reopen serial monitor ──
+    sts.textContent='✓ Done — reconnecting serial monitor in 3s...';
+    setTimeout(async()=>{
+      try{
+        const baud=parseInt(document.getElementById('baudSel').value);
+        await S.port.open({baudRate:baud});
+        S.writer=S.port.writable.getWriter();
+        const tds=new TextDecoderStream();
+        S.port.readable.pipeTo(tds.writable);
+        S.reader=tds.readable.getReader();
+        setConnected(true);
+        termLog('sys',`▶ Serial monitor reconnected @ ${baud} baud`);
+        readLoop();
+      }catch(e){
+        termLog('warn',`Auto-reconnect failed: ${e.message} — press Connect manually`);
+      }
+    },3000);
+
+  }catch(e){
+    bar.style.background='var(--red)';
+    sts.style.color='var(--red)';
+    sts.textContent=`✗ ${e.message}`;
+    termLog('err',`Flash error: ${e.message}`);
+    if(!S.connected&&S.port) termLog('warn','Press Connect to restore serial monitor');
+  }
+}
+
+// Read a File as base64 — used for SD card JPEG upload over serial text protocol
+async function fileToB64(file){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{
+      const ua=new Uint8Array(fr.result);
+      let s='';
+      for(let i=0;i<ua.length;i+=65536) s+=String.fromCharCode(...ua.subarray(i,Math.min(i+65536,ua.length)));
+      res(btoa(s));
+    };
+    fr.onerror=rej;fr.readAsArrayBuffer(file);
+  });
+}
+
+// Read a File as a Latin-1 binary string — required format for esptool-js v0.4+ flash data.
+// Each char's charCode = the raw byte value. NOT base64, NOT ArrayBuffer.
+async function fileToBinaryString(file){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{
+      // fr.result is an ArrayBuffer; convert to Latin-1 string
+      const ua=new Uint8Array(fr.result);
+      // Build string in 64KB chunks to avoid call-stack overflow on large files
+      let str='';
+      for(let i=0;i<ua.length;i+=65536){
+        str+=String.fromCharCode(...ua.subarray(i,Math.min(i+65536,ua.length)));
+      }
+      res(str);
+    };
+    fr.onerror=rej;
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+// ═══════════════════════════════
+//  SD Browser
+// ═══════════════════════════════
+function sdRefresh(){sendCmd(`SD_LIST:${S.cwd}`);}
+
+function sdGoUp(){
+  if(S.cwd==='/'){return;}
+  const parts=S.cwd.replace(/\/$/,'').split('/');
+  parts.pop();
+  sdNavigate(parts.join('/')||'/');
+}
+
+// Helper to sync the SD browser path to the Camera and Mic inputs
+function mySyncSdPaths() {
+  const myCurrentPath = S.cwd;
+  
+  const myCamInput = document.getElementById('camSavePath');
+  const myMicInput = document.getElementById('micSavePath');
+  
+  if (myCamInput) {
+    myCamInput.value = myCurrentPath;
+  }
+  
+  if (myMicInput) {
+    myMicInput.value = myCurrentPath;
+  }
+}
+
+function sdNavigate(path){
+  S.cwd=path;
+  if(!S.cwd.endsWith('/'))S.cwd+='/';
+  if(S.cwd==='//')S.cwd='/';
+  document.getElementById('sdCwdLbl').textContent=`SD: ${S.cwd}`;
+  updateBreadcrumb();
+  sdRefresh();
+  mySyncSdPaths();
+}
+
+function updateBreadcrumb(){
+  const bc=document.getElementById('breadcrumb');
+  const parts=S.cwd.replace(/^\/|\/$/g,'').split('/').filter(Boolean);
+  let html=`<span class="bc-item" onclick="sdNavigate('/')">⊟ /</span>`;
+  let path='';
+  for(const p of parts){
+    path+='/'+p;
+    const cp=path;
+    html+=`<span class="bc-sep">›</span><span class="bc-item" onclick="sdNavigate('${cp}')">${p}</span>`;
+  }
+  bc.innerHTML=html;
+  document.getElementById('btnUp').disabled=(S.cwd==='/');
+}
+
+function renderSdList(){
+  const el=document.getElementById('sdList');
+  if(!S.sdEntries.length){
+    el.innerHTML='<div style="padding:20px;color:var(--dim);font-size:.72rem;text-align:center;">— empty directory —</div>';
+    return;
+  }
+  const sorted=[...S.sdEntries].sort((a,b)=>{
+    if(a.isDir&&!b.isDir)return -1;
+    if(!a.isDir&&b.isDir)return 1;
+    return a.name.localeCompare(b.name);
+  });
+  el.innerHTML=sorted.map(e=>{
+    const isImg=/\.(jpg|jpeg)$/i.test(e.name);
+    const isJson=/\.json$/i.test(e.name);
+    const isBin=/\.bin$/i.test(e.name);
+    const icon=e.isDir?'📁':isImg?'🖼️':isJson?'{}':isBin?'⬡':'📄';
+    const path=(S.cwd+e.name).replace('//','/')
+    const sz=e.isDir?'':fmtB(parseInt(e.size)||0);
+    const cls='sd-entry'+(e.isDir?' sd-dir':'')+(S.selectedFile===path?' selected':'');
+    return `<div class="${cls}" onclick="sdClick('${path}',${e.isDir},event)">
+      <span class="sd-icon">${icon}</span>
+      <span class="sd-name">${e.name}</span>
+      <span class="sd-size">${sz}</span>
+    </div>`;
+  }).join('');
+}
+
+function sdClick(path,isDir,event){
+  if(isDir){sdNavigate(path);return;}
+  S.selectedFile=path;
+  document.querySelectorAll('.sd-entry').forEach(e=>e.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  document.getElementById('btnDeleteFile').style.display='block';
+  openFile(path);
+}
+
+// ─── Open file ───
+function openFile(path){
+  S.contentFile=path;
+  const name=path.split('/').pop();
+  document.getElementById('viewerName').textContent=name;
+  if(S.viewerCollapsed)toggleViewer();
+  // hide all
+  ['imgPreview','jsonEditor','binInfo','viewerPlaceholder'].forEach(id=>{
+    const el=document.getElementById(id);el.style.display='none';
+  });
+  const isImg=/\.(jpg|jpeg)$/i.test(name);
+  const isWav=/\.wav$/i.test(name);
+  const isJson=/\.json$/i.test(name);
+  const isBin=/\.bin$/i.test(name);
+  const isText=/\.(txt|csv|log|md|py|js|html|h|cpp|c|ini|yaml|yml)$/i.test(name);
+
+  if(isImg){
+    // Route to Camera tab — show image in cam preview area
+    const camTab=[...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Camera'));
+    if(camTab) switchTab('camera',camTab);
+    document.getElementById('camPlaceholder').style.display='none';
+    document.getElementById('camImgInfo').className='cam-img-info visible';
+    document.getElementById('camImgInfo').textContent=`⏳ Loading ${name} from SD card...`;
+    document.getElementById('camStatusMsg').textContent=`Loading ${name} from SD...`;
+    S.sdJpegForCam=true;
+    termLog('sys',`Requesting JPEG (→ Camera tab): ${path}`);
+    sendCmd(`SD_JPEG:${path}`);
+  }else if(isWav){
+    // Route to Microphone tab — load and play WAV
+    const micTab=[...document.querySelectorAll('.tab')].find(t=>t.textContent.includes('Microphone'));
+    if(micTab) switchTab('mic',micTab);
+    document.getElementById('micStatusTxt').textContent=`⏳ Loading ${name} from SD card...`;
+    document.getElementById('micInfo').textContent=`Requesting ${name} from SD...`;
+    S.sdWavForMic=true;
+    termLog('sys',`Requesting WAV (→ Microphone tab): ${path}`);
+    sendCmd(`SD_JPEG:${path}`);  // reuse JPEG binary protocol — ESP32 reads any file this way
+  }else if(isJson||isText){
+    document.getElementById('jsonEditor').style.display='flex';
+    document.getElementById('jsonEditor').style.flexDirection='column';
+    document.getElementById('jsonText').value='⏳ Loading...';
+    document.getElementById('jsonStatus').textContent='loading...';
+    sendCmd(`SD_READ:${path}`);
+  }else if(isBin){
+    const el=document.getElementById('binInfo');el.style.display='flex';
+    el.innerHTML='<div style="padding:12px;font-size:.7rem;color:var(--dim);">⏳ Requesting ASCII header (first 256 bytes)...</div>';
+    sendCmd(`SD_HEAD:${path}`);
+  }else{
+    const el=document.getElementById('viewerPlaceholder');el.style.display='flex';
+    el.innerHTML=`<div style="margin:auto;padding:20px;color:var(--dim);font-size:.72rem;text-align:center;">Cannot preview "${name}".<br>Use the terminal to interact.</div>`;
+  }
+}
+
+function displayFileContent(filePath,content){
+  const name=(filePath||'').split('/').pop();
+  const isJson=/\.json$/i.test(name);
+  const isBin=/\.bin$/i.test(name);
+  if(isBin){
+    // Hex dump goes to binInfo panel, not the text editor
+    const el=document.getElementById('binInfo');
+    el.style.cssText='display:flex;flex:1;flex-direction:column;padding:10px 12px;font-size:.68rem;color:#7ab8d4;line-height:1.75;white-space:pre;font-family:Share Tech Mono,monospace;overflow-y:auto;background:#030608;';
+    el.textContent=content;
+  }else{
+    // Text / JSON → editor textarea
+    const ed=document.getElementById('jsonEditor');
+    ed.style.display='flex';ed.style.flexDirection='column';
+    document.getElementById('jsonText').value=content;
+    if(isJson){validateJson();}
+    else{document.getElementById('jsonStatus').textContent=content.split('\n').length+' lines';}
+  }
+}
+
+function showJpeg(b64,path){
+  const name=(path||'').split('/').pop();
+
+  // If flagged for Microphone tab, decode as WAV and load into player
+  if(S.sdWavForMic){
+    S.sdWavForMic=false;
+    let arr;
+    try{
+      const bin=atob(b64);
+      arr=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    }catch(e){
+      termLog('err','WAV decode failed: '+e.message);
+      document.getElementById('micStatusTxt').textContent='✗ Failed to decode WAV';
+      document.getElementById('micInfo').textContent='Decode error — check file';
+      return;
+    }
+    // Validate WAV header: "RIFF" at offset 0, "WAVE" at offset 8
+    const hdr=String.fromCharCode(arr[0],arr[1],arr[2],arr[3]);
+    const wave=(arr.length>11)?String.fromCharCode(arr[8],arr[9],arr[10],arr[11]):'';
+    if(hdr!=='RIFF'||wave!=='WAVE'){
+      termLog('err',`Not a valid WAV: ${name} (got ${hdr}/${wave})`);
+      document.getElementById('micStatusTxt').textContent='✗ Not a valid WAV file';
+      document.getElementById('micInfo').textContent=`${name} — invalid WAV header`;
+      return;
+    }
+    S.micWavBytes=arr;
+    termLog('ok',`WAV loaded from SD: ${name} (${(arr.length/1024).toFixed(1)} KB)`);
+    micOnReceived(arr);
+    return;
+  }
+
+  // If flagged for Camera tab, show in cam preview instead of SD viewer
+  if(S.sdJpegForCam){
+    S.sdJpegForCam=false;
+    S.camB64=b64; // allow Save to PC/SD buttons to work
+    const img=new Image();
+    img.onload=function(){
+      const camImg=document.getElementById('camImg');
+      camImg.src=img.src;
+      camImg.className='loaded';
+      document.getElementById('camPlaceholder').style.display='none';
+      const info=`${name} · ${img.naturalWidth}×${img.naturalHeight} px`;
+      const infoEl=document.getElementById('camImgInfo');
+      infoEl.textContent=info;
+      infoEl.className='cam-img-info visible';
+      document.getElementById('camStatusMsg').textContent=`✓ ${info} — loaded from SD`;
+      document.getElementById('btnSavePC').disabled=false;
+      termLog('ok',`JPEG loaded from SD (Camera tab): ${name} (${img.naturalWidth}×${img.naturalHeight})`);
+    };
+    img.onerror=()=>{
+      document.getElementById('camStatusMsg').textContent='✗ Failed to decode JPEG';
+      termLog('err','JPEG decode failed');
+    };
+    img.src='data:image/jpeg;base64,'+b64;
+    return;
+  }
+
+  // Default: show in SD viewer panel
+  const el=document.getElementById('imgPreview');
+  const img=new Image();
+  img.onload=function(){
+    el.innerHTML='';
+    const imgEl=document.createElement('img');
+    imgEl.src=img.src;
+    const info=document.createElement('div');
+    info.className='img-info';
+    info.textContent=`${name} · ${img.naturalWidth}×${img.naturalHeight} px`;
+    const dl=document.createElement('a');
+    dl.href=img.src;dl.download=name;
+    dl.className='btn sm';dl.textContent='↓ Save Image';
+    dl.style.cssText='font-size:.65rem;text-decoration:none;margin-top:4px;';
+    el.appendChild(imgEl);el.appendChild(info);el.appendChild(dl);
+    termLog('ok',`JPEG loaded: ${name} (${img.naturalWidth}×${img.naturalHeight})`);
+  };
+  img.onerror=()=>{el.innerHTML='<div class="img-info" style="color:var(--red)">✗ Failed to decode JPEG</div>';};
+  img.src='data:image/jpeg;base64,'+b64;
+}
+
+// ─── JSON editor helpers ───
+function validateJson(){
+  const txt=document.getElementById('jsonText').value;
+  const sts=document.getElementById('jsonStatus');
+  try{JSON.parse(txt);sts.style.color='var(--green)';sts.textContent='✓ Valid JSON';}
+  catch(e){sts.style.color='var(--red)';sts.textContent=`✗ ${e.message}`;}
+}
+function saveEditorFile(){
+  if(!S.contentFile){termLog('err','No file open');return;}
+  const content=document.getElementById('jsonText').value;
+  const encoded=content.replace(/\r\n/g,'\n').replace(/\n/g,'\\n');
+  sendCmd(`SD_WRITE:${S.contentFile}:${encoded}`);
+}
+function downloadEditorFile(){
+  if(!S.contentFile)return;
+  const name=S.contentFile.split('/').pop();
+  dlBlob(new Blob([document.getElementById('jsonText').value],{type:'text/plain'}),name);
+}
+
+// ─── Upload from PC ───
+function triggerUpload(){document.getElementById('pcFileInput').click();}
+async function uploadFilesToSD(files){
+  if(!files||!files.length)return;
+  for(const file of files){
+    const destPath=(S.cwd+file.name).replace('//','/');;
+    const isImg=/\.(jpg|jpeg)$/i.test(file.name);
+    if(isImg){
+      termLog('sys',`Uploading image: ${file.name} (${fmtB(file.size)})`);
+      const b64=await fileToB64(file);
+      const chunkSize=200;
+      await sendCmd(`SD_JPEG_WRITE_START:${destPath}:${file.size}`);
+      for(let i=0;i<b64.length;i+=chunkSize){
+        await writeSerial(`SD_JPEG_CHUNK:${b64.slice(i,i+chunkSize)}\n`);
+        await new Promise(r=>setTimeout(r,8));
+      }
+      await sendCmd('SD_JPEG_WRITE_END');
+    }else{
+      const text=await file.text();
+      const encoded=text.replace(/\r\n/g,'\n').replace(/\n/g,'\\n');
+      sendCmd(`SD_WRITE:${destPath}:${encoded}`);
+      termLog('sys',`Uploading: ${file.name}`);
+    }
+  }
+  document.getElementById('pcFileInput').value='';
+  setTimeout(sdRefresh,600);
+}
+
+// ─── New / Delete ───
+function sdNewFile(){
+  document.getElementById('newFileName').value='';
+  document.getElementById('newFileContent').value='{\n}';
+  document.getElementById('newFileModal').classList.add('open');
+}
+function confirmNewFile(){
+  const name=document.getElementById('newFileName').value.trim();
+  const content=document.getElementById('newFileContent').value;
+  if(!name){alert('Enter a filename');return;}
+  const path=(S.cwd+name).replace('//','/');;
+  sendCmd(`SD_WRITE:${path}:${content.replace(/\r\n/g,'\n').replace(/\n/g,'\\n')}`);
+  closeModal('newFileModal');setTimeout(sdRefresh,500);
+}
+function sdDeleteSelected(){
+  if(!S.selectedFile)return;
+  if(!confirm(`Delete ${S.selectedFile} from SD card?`))return;
+  sendCmd(`SD_DELETE:${S.selectedFile}`);
+  S.selectedFile=null;
+  document.getElementById('btnDeleteFile').style.display='none';
+  setTimeout(sdRefresh,400);
+}
+
+// ─── Viewer collapse ───
+function toggleViewer(){
+  S.viewerCollapsed=!S.viewerCollapsed;
+  document.getElementById('sdViewer').classList.toggle('collapsed',S.viewerCollapsed);
+  document.getElementById('viewerToggle').textContent=S.viewerCollapsed?'▸':'▾';
+}
+
+// ═══════════════════════════════
+//  OLED
+// ═══════════════════════════════
+function sendOled(){
+  const raw=document.getElementById('oledMsg').value.trim();
+  if(!raw)return;
+  const fontMode=document.getElementById('oledDisplayMode').value;
+  // Ensure ESP32 is in the right font mode before sending the message
+  if(fontMode==='msg_sm') sendCmd('OLED_FONT:SMALL');
+  else if(fontMode==='msg_lg') sendCmd('OLED_FONT:LARGE');
+  else sendCmd('OLED_FONT:NORMAL');
+  // raw may contain literal \n typed by user — send as-is to ESP32
+  // The sketch does msg.replace("\\n","\n") so literal \n becomes a real newline on device
+  sendCmd(`OLED:${raw}`);
+  // Local canvas preview: convert literal \n → real newline for rendering
+  const decoded=raw.replace(/\\n/g,'\n');
+  if(fontMode==='msg_sm') OLED.messageSmall(decoded);
+  else if(fontMode==='msg_lg') OLED.messageLarge(decoded);
+  else OLED.message(decoded);
+  document.getElementById('oledMsg').value='';
+}
+document.getElementById('oledMsg').addEventListener('keydown',e=>{if(e.key==='Enter')sendOled();});
+
+// drawOledText — called from OLED_ECHO: serial responses
+// The ESP32 echo arrives as separate serial lines because real \n splits the serial stream.
+// We store partial echoes and reassemble them.
+let _oledEchoLines = [];
+let _oledEchoTimer = null;
+function drawOledText(msg){
+  // ESP32 now escapes real \n as literal \n in the echo (so serial line splitting is avoided)
+  // Convert the literal \n back to real newline for the canvas renderer
+  const decoded = msg.replace(/\\n/g, '\n');
+  OLED.message(decoded);
+}
+
+// Handle OLED display mode dropdown
+// Track whether the OLED dropdown started the IMU stream so we can stop it on mode change
+let _oledStartedImuStream = false;
+
+function oledSetDisplayMode(mode){
+  // If leaving IMU mode that we started, stop the stream
+  if(oledMode==='imu' && mode!=='imu' && _oledStartedImuStream){
+    sendCmd('IMU_STOP');
+    _oledStartedImuStream = false;
+  }
+  if(mode==='imu'){
+    sendCmd('OLED_IMU'); oledMode='imu';
+    // Also start IMU streaming so OLED updates live and switch to IMU detail tab
+    sendCmd('IMU_STREAM');
+    _oledStartedImuStream = true;
+    // Switch to IMU tab so user sees live data
+    const imuTab = [...document.querySelectorAll('.tab')].find(t=>t.textContent.trim()==='IMU Detail');
+    if(imuTab) switchTab('imu', imuTab);
+  }else if(mode==='status'){
+    sendCmd('OLED_STATUS'); oledMode='status'; updateOledStatus();
+  }else if(mode==='off'){
+    sendCmd('OLED_CLEAR'); oledMode='message'; OLED.render(()=>{});
+  }else if(mode==='msg_sm'){
+    // Small font mode — send OLED_FONT:SMALL command (handled by ESP32)
+    sendCmd('OLED_FONT:SMALL'); oledMode='message';
+    // local preview: use smaller text
+    const msg=document.getElementById('oledMsg').value||'Small font';
+    OLED.messageSmall(msg.replace(/\\n/g,'\n'));
+  }else if(mode==='msg_lg'){
+    sendCmd('OLED_FONT:LARGE'); oledMode='message';
+    const msg=document.getElementById('oledMsg').value||'Big';
+    OLED.messageLarge(msg.replace(/\\n/g,'\n'));
+  }else{
+    // 'msg' — standard message mode, no action needed unless msg is set
+    oledMode='message';
+  }
+}
+
+// Track OLED display mode to keep simulation in sync with sketch
+let oledMode = 'message'; // 'message' | 'imu' | 'status'
+
+// Cached device status for the status screen
+const devStatus = { imuOk: true, sdOk: true, uptime: 0 };
+
+// Parse uptime seconds from STATUS response lines and update devStatus
+function parseStatusLine(line) {
+  // Matches "Uptime: 123 s" from sketch printStatus()
+  const m = line.match(/uptime[:\s]+(\d+)/i);
+  if (m) devStatus.uptime = parseInt(m[1]);
+  if (/imu.*ok/i.test(line))   devStatus.imuOk = true;
+  if (/imu.*fail/i.test(line)) devStatus.imuOk = false;
+  if (/sd.*ok/i.test(line))    devStatus.sdOk  = true;
+  if (/sd.*fail/i.test(line))  devStatus.sdOk  = false;
+}
+
+// Show current status on the OLED sim — mirrors oledShowStatus() in sketch
+function updateOledStatus() {
+  OLED.status(devStatus.imuOk, devStatus.sdOk, devStatus.uptime);
+}
+
+// ═══════════════════════════════
+//  Microphone
+// ═══════════════════════════════
+
+// ── Waveform canvas ──
+(function initMicCanvas(){
+  // Resize canvas to match display size on tab switch
+  const resizeWave = () => {
+    const c = document.getElementById('micWaveCanvas');
+    if(!c) return;
+    const wrap = c.parentElement;
+    c.width  = wrap.clientWidth  || 400;
+    c.height = wrap.clientHeight || 80;
+    micDrawIdle();
+  };
+  // Resize when mic tab becomes active
+  const observer = new MutationObserver(() => {
+    if(document.getElementById('tab-mic').classList.contains('active')) resizeWave();
+  });
+  observer.observe(document.getElementById('tab-mic'), {attributes:true,attributeFilter:['class']});
+  window.addEventListener('resize', resizeWave);
+  setTimeout(resizeWave, 200);
+})();
+
+function micDrawIdle(){
+  const c = document.getElementById('micWaveCanvas');
+  if(!c) return;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#020508';
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle = 'rgba(0,212,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, c.height/2);
+  ctx.lineTo(c.width, c.height/2);
+  ctx.stroke();
+}
+
+function micDrawWaveform(samples16){
+  // samples16 is Int16Array of the PCM data (skip 44-byte WAV header)
+  const c = document.getElementById('micWaveCanvas');
+  if(!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.fillStyle = '#020508';
+  ctx.fillRect(0,0,W,H);
+  // Downsample to canvas width
+  const step = Math.max(1, Math.floor(samples16.length / W));
+  ctx.beginPath();
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 1;
+  for(let x = 0; x < W; x++){
+    const i = x * step;
+    const v = samples16[i] / 32768; // -1 to 1
+    const y = (1 - v) * H/2;
+    x===0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  // Faint fill
+  ctx.lineTo(W, H/2); ctx.lineTo(0, H/2);
+  ctx.fillStyle = 'rgba(0,212,255,0.06)';
+  ctx.fill();
+}
+
+// ── VU meter ──
+let _vuPeak = 0, _vuPeakTimer = null;
+function micUpdateVU(level){
+  // level 0-32767 (int16 peak)
+  const pct = Math.min(100, level / 32767 * 100);
+  document.getElementById('micVuFill').style.width = pct + '%';
+  if(pct > _vuPeak){
+    _vuPeak = pct;
+    document.getElementById('micVuPeak').style.left = pct + '%';
+    clearTimeout(_vuPeakTimer);
+    _vuPeakTimer = setTimeout(()=>{_vuPeak=0;}, 1200);
+  }
+}
+
+// ── State helpers ──
+let _micTimerInterval = null;
+let _micElapsed = 0;
+let _micAudio = null;  // Web Audio AudioBufferSourceNode for playback
+
+function micSetState(state){
+  const dot = document.getElementById('micDot');
+  const txt = document.getElementById('micStatusTxt');
+  const timer = document.getElementById('micTimer');
+  if(state === 'idle'){
+    dot.className = 'mic-rec-dot';
+    txt.textContent = 'Ready';
+    clearInterval(_micTimerInterval);
+  } else if(state === 'recording'){
+    dot.className = 'mic-rec-dot rec';
+    txt.textContent = 'Recording...';
+    _micElapsed = 0;
+    timer.textContent = '0.0s';
+    clearInterval(_micTimerInterval);
+    _micTimerInterval = setInterval(()=>{
+      _micElapsed += 0.1;
+      timer.textContent = _micElapsed.toFixed(1)+'s';
+    }, 100);
+  } else if(state === 'receiving'){
+    dot.className = 'mic-rec-dot rec';
+    txt.textContent = 'Receiving audio...';
+    clearInterval(_micTimerInterval);
+  } else if(state === 'done'){
+    dot.className = 'mic-rec-dot done';
+    clearInterval(_micTimerInterval);
+  }
+}
+
+function micSetProgress(pct){
+  // Reuse the VU fill as a progress bar during transfer
+  document.getElementById('micVuFill').style.width = pct+'%';
+}
+
+function micUseCwd(){
+  document.getElementById('micSavePath').value = S.cwd;
+}
+
+// ── Generate WAV filename ──
+function micFilename(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `rec_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.wav`;
+}
+
+// ── Send MIC_RECORD command ──
+async function micRecord(){
+  if(!S.writer){ termLog('err','Not connected'); return; }
+  if(S.micRecording){ termLog('warn','Recording already in progress'); return; }
+  S.micRecording = true;
+  S.micWavBytes = null;
+  document.getElementById('btnMicSaveSD').disabled = true;
+  document.getElementById('btnMicSavePC').disabled = true;
+  document.getElementById('micPlayback').className = 'mic-playback';
+
+  const dur  = document.getElementById('micDuration').value;
+  const gain = document.getElementById('micGain').value;
+  const sr   = document.getElementById('micSampleRate').value;
+
+  // Estimate number of 60-char base64 chunks for progress bar
+  // WAV = 44 header + dur × sr × 2 bytes PCM; base64 factor = 4/3; chunks of 60
+  const wavBytes = 44 + parseInt(dur) * parseInt(sr) * 2;
+  S.micTotalChunks = Math.ceil(wavBytes * 4/3 / 60);
+
+  micSetState('recording');
+  micDrawIdle();
+  document.getElementById('micInfo').textContent = `Recording ${dur}s at ${parseInt(sr)/1000}kHz...`;
+  termLog('sys', `🎙 MIC_RECORD dur=${dur} gain=${gain} sr=${sr}`);
+
+  await sendCmd(`MIC_RECORD:${dur}:${gain}:${sr}`);
+}
+
+// ── Called when MIC_WAV_END received — WAV bytes ready ──
+function micOnReceived(wavBytes){
+  S.micRecording = false;
+  micSetState('done');
+  micSetProgress(0);  // reset VU bar
+
+  // Parse WAV header to get duration
+  const dataSize = wavBytes.length - 44;
+  const view = new DataView(wavBytes.buffer);
+  const sr = view.getUint32(24, true);
+  const dur = (dataSize / 2 / sr).toFixed(2);
+  const kb  = (wavBytes.length / 1024).toFixed(1);
+
+  document.getElementById('micStatusTxt').textContent = `✓ ${dur}s · ${kb} KB · ${sr/1000}kHz`;
+  document.getElementById('micTimer').textContent = dur+'s';
+  document.getElementById('micInfo').textContent = `${dur}s · ${kb} KB · ${sr/1000} kHz · 16-bit mono PCM WAV`;
+  document.getElementById('btnMicSaveSD').disabled = false;
+  document.getElementById('btnMicSavePC').disabled = false;
+  termLog('ok', `🎙 Recording received: ${dur}s · ${kb} KB`);
+
+  // Draw waveform from PCM data (skip 44-byte header)
+  const pcm = new Int16Array(wavBytes.buffer, 44);
+  micDrawWaveform(pcm);
+
+  // Set up Web Audio playback
+  micPrepareAudio(wavBytes, parseFloat(dur));
+}
+
+// ── Web Audio playback ──
+let _audioCtx = null;
+let _audioSource = null;
+let _audioBuffer = null;
+let _playStartTime = 0;
+let _playDuration  = 0;
+let _playInterval  = null;
+let _isPlaying = false;
+
+function micPrepareAudio(wavBytes, durSec){
+  if(!_audioCtx) _audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  _playDuration = durSec;
+  // Decode WAV — Web Audio handles WAV natively
+  _audioCtx.decodeAudioData(wavBytes.buffer.slice(0), function(buf){
+    _audioBuffer = buf;
+    _playDuration = buf.duration;
+    document.getElementById('micPlayback').className = 'mic-playback visible';
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    micUpdatePlayTime(0);
+  }, function(){
+    termLog('warn','Web Audio could not decode WAV — download to play');
+  });
+}
+
+function micPlay(){
+  if(!_audioBuffer){ termLog('err','No recording to play'); return; }
+  if(_isPlaying){
+    // Stop
+    if(_audioSource){ try{_audioSource.stop();}catch{} }
+    _isPlaying = false;
+    clearInterval(_playInterval);
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    return;
+  }
+  if(!_audioCtx) _audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(_audioCtx.state === 'suspended') _audioCtx.resume();
+  _audioSource = _audioCtx.createBufferSource();
+  _audioSource.buffer = _audioBuffer;
+  _audioSource.connect(_audioCtx.destination);
+  _audioSource.start(0);
+  _audioSource.onended = ()=>{
+    _isPlaying = false;
+    clearInterval(_playInterval);
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    document.getElementById('micPlayFill').style.width = '0%';
+    micUpdatePlayTime(0);
+  };
+  _playStartTime = _audioCtx.currentTime;
+  _isPlaying = true;
+  document.getElementById('btnPlay').textContent = '⏹ Stop';
+  clearInterval(_playInterval);
+  _playInterval = setInterval(()=>{
+    const elapsed = _audioCtx.currentTime - _playStartTime;
+    const pct = Math.min(100, elapsed/_playDuration*100);
+    document.getElementById('micPlayFill').style.width = pct+'%';
+    micUpdatePlayTime(elapsed);
+  }, 100);
+}
+
+function micSeek(e){
+  if(!_audioBuffer) return;
+  const bar = document.getElementById('micPlayBar');
+  const pct = e.offsetX / bar.clientWidth;
+  if(_isPlaying){
+    if(_audioSource){ try{_audioSource.stop();}catch{} }
+    _isPlaying = false; clearInterval(_playInterval);
+    document.getElementById('btnPlay').textContent = '▶ Play';
+  }
+  micUpdatePlayTime(pct * _playDuration);
+  document.getElementById('micPlayFill').style.width = (pct*100)+'%';
+}
+
+function micUpdatePlayTime(elapsed){
+  const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+  document.getElementById('micPlayTime').textContent = `${fmt(elapsed)} / ${fmt(_playDuration)}`;
+}
+
+// ── Save to SD ──
+async function micSaveToSD(){
+  if(!S.micWavBytes){ termLog('err','No recording to save'); return; }
+  let dir = document.getElementById('micSavePath').value.trim();
+  if(!dir) dir = S.cwd;
+  if(!dir.endsWith('/')) dir += '/';
+  const fname = micFilename();
+  const destPath = (dir + fname).replace('//','/');
+  termLog('sys', `Saving WAV to SD: ${destPath}`);
+  document.getElementById('micInfo').textContent = `Saving to ${destPath}...`;
+  document.getElementById('btnMicSaveSD').disabled = true;
+
+  // Encode WAV bytes to base64 in chunks and send via SD_JPEG_WRITE protocol
+  // (re-using the same chunked base64 write path)
+  const bytes = S.micWavBytes;
+  let b64 = '';
+  const CHUNK = 3000; // encode 3KB at a time to avoid huge string concat
+  for(let i = 0; i < bytes.length; i += CHUNK){
+    const slice = bytes.slice(i, i+CHUNK);
+    let bin = '';
+    for(let j = 0; j < slice.length; j++) bin += String.fromCharCode(slice[j]);
+    b64 += btoa(bin);
+  }
+
+  const chunkSize = 200;
+  await sendCmd(`SD_JPEG_WRITE_START:${destPath}:${bytes.length}`);
+  for(let i = 0; i < b64.length; i += chunkSize){
+    await writeSerial(`SD_JPEG_CHUNK:${b64.slice(i, i+chunkSize)}\n`);
+    await new Promise(r => setTimeout(r, 8));
+  }
+  await sendCmd('SD_JPEG_WRITE_END');
+
+  document.getElementById('btnMicSaveSD').disabled = false;
+  document.getElementById('micInfo').textContent = `✓ Saved to ${destPath}`;
+  if(dir !== S.cwd) sdNavigate(dir.slice(0,-1)||'/');
+  else setTimeout(sdRefresh, 500);
+}
+
+// ── Save to PC ──
+function micSaveToPC(){
+  if(!S.micWavBytes){ termLog('err','No recording to save'); return; }
+  const fname = micFilename();
+  dlBlob(new Blob([S.micWavBytes], {type:'audio/wav'}), fname);
+  termLog('ok', `↓ Downloaded: ${fname}`);
+}
+
+// ═══════════════════════════════
+//  Camera
+// ═══════════════════════════════
+
+// Generate a timestamp filename: img_YYYYMMDD_HHMMSS.jpg
+function camFilename() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `img_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+}
+
+// Set the SD save path to the current working directory
+function camUseCwd() {
+  document.getElementById('camSavePath').value = S.cwd;
+}
+
+// Send CAM_CAPTURE command with resolution + quality params
+async function camCapture() {
+  if(!S.writer){ termLog('err','Not connected'); return; }
+  if(S.camCapturing){ termLog('warn','Capture already in progress'); return; }
+  S.camCapturing = true;
+  S.camB64 = null;
+
+  // Disable save buttons until new image arrives
+  document.getElementById('btnSaveSD').disabled = true;
+  document.getElementById('btnSavePC').disabled = true;
+
+  const res  = document.getElementById('camRes').value;
+  const qual = document.getElementById('camQuality').value;
+
+  // Show overlay spinner
+  const overlay = document.getElementById('camOverlay');
+  overlay.classList.add('active');
+  document.getElementById('camOverlayMsg').textContent = 'Capturing...';
+
+  // Hide placeholder, show img element (empty for now)
+  document.getElementById('camPlaceholder').style.display = 'none';
+  document.getElementById('camImgInfo').className = 'cam-img-info';
+
+  termLog('sys', `📷 CAM_CAPTURE res=${res} quality=${qual}`);
+  document.getElementById('camStatusMsg').textContent = `Capturing ${res} q=${qual}...`;
+
+  // Send command — sketch will respond with CAM_JPEG_START ... CAM_JPEG_END
+  await sendCmd(`CAM_CAPTURE:${res}:${qual}`);
+}
+
+// Called when CAM_JPEG_END received — render the image
+function camShowCapture(b64) {
+  const overlay = document.getElementById('camOverlay');
+  overlay.classList.remove('active');
+
+  const img = document.getElementById('camImg');
+  img.onload = function() {
+    img.className = 'loaded';
+    const kb = Math.round(b64.length * 0.75 / 1024 * 10) / 10;
+    const info = `${img.naturalWidth}×${img.naturalHeight} px · ~${kb} KB`;
+    const infoEl = document.getElementById('camImgInfo');
+    infoEl.textContent = info;
+    infoEl.className = 'cam-img-info visible';
+    document.getElementById('btnSaveSD').disabled = false;
+    document.getElementById('btnSavePC').disabled = false;
+    document.getElementById('camStatusMsg').textContent = `✓ ${info} — ready to save`;
+    termLog('ok', `📷 Capture complete: ${info}`);
+  };
+  img.onerror = () => {
+    document.getElementById('camStatusMsg').textContent = '✗ Failed to decode JPEG';
+    termLog('err', 'Camera JPEG decode failed');
+    document.getElementById('camPlaceholder').style.display = '';
+    S.camCapturing = false;
+  };
+  img.src = 'data:image/jpeg;base64,' + b64;
+}
+
+// Save the last capture to SD card, into the specified path
+async function camSaveToSD() {
+  if(!S.camB64){ termLog('err','No capture to save'); return; }
+  let dir = document.getElementById('camSavePath').value.trim();
+  if(!dir) dir = S.cwd;
+  if(!dir.endsWith('/')) dir += '/';
+  const fname = camFilename();
+  const destPath = (dir + fname).replace('//', '/');
+
+  termLog('sys', `Saving capture to SD: ${destPath}`);
+  document.getElementById('camStatusMsg').textContent = `Saving to ${destPath}...`;
+  document.getElementById('btnSaveSD').disabled = true;
+
+  const b64 = S.camB64;
+  const chunkSize = 200;
+  await sendCmd(`SD_JPEG_WRITE_START:${destPath}:${Math.round(b64.length * 0.75)}`);
+  for(let i = 0; i < b64.length; i += chunkSize){
+    await writeSerial(`SD_JPEG_CHUNK:${b64.slice(i, i+chunkSize)}
+`);
+    await new Promise(r => setTimeout(r, 8));
+  }
+  await sendCmd('SD_JPEG_WRITE_END');
+
+  // Re-enable and refresh the SD folder so the new file appears
+  document.getElementById('btnSaveSD').disabled = false;
+  document.getElementById('camStatusMsg').textContent = `✓ Saved to ${destPath}`;
+  // Auto-navigate to the save folder so user can see it
+  if(dir !== S.cwd){ sdNavigate(dir.slice(0,-1)||'/'); }
+  else{ setTimeout(sdRefresh, 500); }
+}
+
+// Download the last capture directly to the PC
+function camSaveToPC() {
+  if(!S.camB64){ termLog('err','No capture to save'); return; }
+  const fname = camFilename();
+  // Convert base64 to blob and trigger download
+  const binary = atob(S.camB64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  dlBlob(new Blob([bytes], {type:'image/jpeg'}), fname);
+  termLog('ok', `↓ Downloaded: ${fname}`);
+}
+
+// ═══════════════════════════════
+//  Modals
+// ═══════════════════════════════
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-overlay').forEach(m=>{
+  m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');});
+});
+</script>
+</body>
+</html>
