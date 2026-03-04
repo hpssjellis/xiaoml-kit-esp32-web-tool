@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>XIAO ESP32S3 · WebSerial Lab</title>
+<title>XIAO ML Kit · WebSerial Lab</title>
 </head>
 <body>
 
-<h1>XIAO ESP32S3 · WebSerial Lab</h1>
-<p style="font-size:0.85em">ESP32S3 Sense · LSM6DS3 IMU · SSD1306 0.42" OLED · SD File Manager · ESP Web Tools Flash</p>
+<h1>XIAO ML Kit · WebSerial Lab</h1>
+<p style="font-size:0.85em">The Seeedstudio $38.90 USD <a href="https://www.seeedstudio.com/The-XIAOML-Kit.html">XIAO ML Kit</a> is a ESP32S3 Sense · LSM6DS3 IMU · SSD1306 0.42" OLED · SD File Manager · ESP Web Tools Flash<br>
+The github is here <a href="hpssjellis/xiaoml-kit-esp32-web-tool">https://github.com/hpssjellis/xiaoml-kit-esp32-web-tool</a> The Arduino IDE sketch is here <a href="esp32-to-web09.txt">esp32-to-web09.txt</a><br>
+Reminder to support the <a href="https://mlsysbook.ai/">mlsysbook.ai</a> opencollective <a href="https://opencollective.com/mlsysbook">opencollective.com/mlsysbook</a></p>
 <p>Status: <strong id="stlbl">DISCONNECTED</strong> <span id="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:red;vertical-align:middle;"></span></p>
 
 <hr>
@@ -148,7 +150,7 @@
       <p style="font-size:0.8em;">Flash a merged binary combining bootloader, partition table, and app. Use for fresh chips.</p>
       <label>File: <input type="file" id="fMerged" accept=".bin"></label>
       <label>Address: <input type="text" id="aMerged" value="0x0" style="width:80px;"></label><br>
-      <small>Default: <code>esp32_web_tool_test07.ino.merged.bin</code> → 0x0 — browse to override</small>
+      <small>Default: <code>esp32_web_tool_test09.ino.merged.bin</code> → 0x0 — browse to override</small>
     </fieldset>
     <br>
     <progress id="progBar" value="0" max="100" style="width:100%;display:none;"></progress>
@@ -372,9 +374,9 @@ const S = {
   rxBytes:0,txBytes:0,autoScroll:true,
   connectedAt:null,uptimeTimer:null,
   flashMode: 'A',
-  myFlashSketchFile: 'esp32_web_tool_test07.ino.bin',
+  myFlashSketchFile: 'esp32_web_tool_test09.ino.bin',
   myFlashSketchAddr: '0x10000',
-  myFlashMergedFile: 'esp32_web_tool_test07.ino.merged.bin',
+  myFlashMergedFile: 'esp32_web_tool_test09.ino.merged.bin',
   myFlashMergedAddr: '0x0',
   cwd:'/',
   sdEntries:[],
