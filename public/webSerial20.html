@@ -105,7 +105,7 @@ label.lbl{font-size:.65rem;color:var(--dim);letter-spacing:.1em;text-transform:u
 .tab-pane.active{display:flex;}
 
 /* TERMINAL */
-#terminal{flex:1;overflow-y:auto;padding:12px 14px;font-size:.76rem;line-height:1.65;background:#050b10;color:#7ab8d4;word-break:break-all;min-height:0;}
+#terminal{flex:1;overflow-y:auto;padding:12px 14px;font-size:.76rem;line-height:1.65;background:var(--term-bg);color:#7ab8d4;word-break:break-all;min-height:0;}
 #terminal .rx{color:#7ab8d4;}
 #terminal .tx{color:var(--accent2);}
 #terminal .sys{color:var(--dim);font-style:italic;}
@@ -136,7 +136,7 @@ label.lbl{font-size:.65rem;color:var(--dim);letter-spacing:.1em;text-transform:u
 /* IMU */
 .imu-wrap{padding:14px;overflow-y:auto;flex:1;}
 .imu-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
-.imu-cell{background:#050b10;border:1px solid var(--border);border-radius:4px;padding:10px 6px;text-align:center;}
+.imu-cell{background: var(--term-bg);border:1px solid var(--border);border-radius:4px;padding:10px 6px;text-align:center;}
 .imu-axis{font-size:.6rem;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px;}
 .imu-val{font-family:'Exo 2',sans-serif;font-size:1.1rem;font-weight:600;color:var(--accent);}
 .imu-unit{font-size:.58rem;color:var(--dim);margin-top:2px;}
@@ -168,7 +168,7 @@ label.lbl{font-size:.65rem;color:var(--dim);letter-spacing:.1em;text-transform:u
 #imgPreview img{max-width:100%;max-height:160px;object-fit:contain;}
 .img-info{color:var(--dim);font-size:.65rem;text-align:center;}
 #jsonEditor{flex:1;min-height:0;display:flex;flex-direction:column;}
-#jsonEditor textarea{flex:1;background:#030608;border:none;color:#a8d8a8;font-family:'Share Tech Mono',monospace;font-size:.72rem;padding:10px;resize:none;outline:none;line-height:1.6;width:100%;min-height:0;}
+#jsonEditor textarea{flex:1;background: var(--term-bg);border:none;color:#a8d8a8;font-family:'Share Tech Mono',monospace;font-size:.72rem;padding:10px;resize:none;outline:none;line-height:1.6;width:100%;min-height:0;}
 .editor-bar{display:flex;gap:6px;padding:6px 10px;background:var(--surf2);border-top:1px solid var(--border);flex-shrink:0;align-items:center;}
 #jsonStatus{font-size:.66rem;color:var(--dim);flex:1;}
 #binInfo{display:flex;flex-direction:column;flex:1;overflow-y:auto;padding:10px;font-size:.7rem;color:var(--dim);line-height:1.7;white-space:pre-wrap;}
@@ -176,7 +176,7 @@ label.lbl{font-size:.65rem;color:var(--dim);letter-spacing:.1em;text-transform:u
 
 /* CAMERA TAB */
 .cam-wrap{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
-.cam-preview{flex:1;background:#020508;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;position:relative;min-height:0;}
+.cam-preview{flex:1;background: var(--term-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;position:relative;min-height:0;}
 .cam-preview img{max-width:100%;max-height:100%;object-fit:contain;display:none;}
 .cam-preview img.loaded{display:block;}
 .cam-placeholder{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--dim);}
@@ -204,7 +204,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
 
 /* MIC TAB */
 .mic-wrap{display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;}
-.mic-viz{flex:1;background:#020508;position:relative;min-height:80px;overflow:hidden;display:flex;flex-direction:column;}
+.mic-viz{flex:1;background: var(--term-bg);position:relative;min-height:80px;overflow:hidden;display:flex;flex-direction:column;}
 .mic-canvas-wrap{flex:1;position:relative;min-height:0;}
 #micWaveCanvas{display:block;width:100%;height:100%;}
 .mic-vu-bar{height:8px;background:var(--border);position:relative;flex-shrink:0;}
