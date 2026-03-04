@@ -366,7 +366,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
         <div style="font-size:.7rem;color:var(--dim);margin-bottom:14px;line-height:1.6;border-left:2px solid var(--accent2);padding-left:10px;">
           Uses <b style="color:var(--text)">esptool-js v0.5.7</b> to flash via WebSerial directly from the browser.
           If serial monitor is connected it will be released automatically before flashing and reconnected after.
-          Requires HTTPS or localhost.
+          Requires HTTPS or localhost. <a href="esp32-to-web09.txt">Click here for the esp32-to-web09.txt </a> sketch if you want to use the Arduino IDE and to look at the code. <br>
         </div>
 
         <div class="flash-option sel" id="optA" onclick="selFlash('A')">
@@ -378,7 +378,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
               <input type="file" id="fSketch" accept=".bin">
               <input type="text" id="aSketch" value="0x10000" style="width:80px">
             </div>
-            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test09.ino.bin</span> · Browse to override</div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.bin</span> · Browse to override</div>
           </div>
         </div>
 
@@ -391,7 +391,7 @@ canvas#oledCanvas{display:block; image-rendering:pixelated; image-rendering:cris
               <input type="file" id="fMerged" accept=".bin">
               <input type="text" id="aMerged" value="0x0" style="width:80px">
             </div>
-            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test09.ino.merged.bin</span> → 0x0 · Browse to override</div>
+            <div style="font-size:.63rem;color:var(--dim);margin-top:4px;">Default auto-loaded: <span style="color:var(--accent)">esp32_web_tool_test07.ino.merged.bin</span> → 0x0 · Browse to override</div>
           </div>
         </div>
 
@@ -703,11 +703,11 @@ const S = {
     // Flash settings
     myFlashMode: 'A', // Tracks if Option A or Option B is active
     // Option A: Sketch Only
-    myFlashSketchFile: 'esp32_web_tool_test09.ino.bin',
+    myFlashSketchFile: 'esp32_web_tool_test07.ino.bin',
     myFlashSketchAddr: '0x10000',
 
     // Option B: Full Merged
-    myFlashMergedFile: 'esp32_web_tool_test09.ino.merged.bin',
+    myFlashMergedFile: 'esp32_web_tool_test07.ino.merged.bin',
     myFlashMergedAddr: '0x0',
   cwd:'/',
   sdEntries:[],
